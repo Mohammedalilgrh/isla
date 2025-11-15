@@ -1,5 +1,6 @@
-python-telegram-bot==20.7
-Pillow==10.2.0
-arabic-reshaper==3.0.0
-python-bidi==0.4.2
-pyngrok==7.1.2
+python-telegram-bot
+Pillow
+arabic-reshaper
+python-bidi
+flask
+gunicorn
