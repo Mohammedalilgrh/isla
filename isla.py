@@ -5,12 +5,21 @@ from telegram.ext import Application, CommandHandler, MessageHandler, filters, C
 from PIL import Image, ImageDraw, ImageFont
 import arabic_reshaper
 from bidi.algorithm import get_display
+import asyncio
+from flask import Flask
 
-# Bot Configuration
-BOT_TOKEN = "8422015788:AAF2HozDLDeDVMXD0HLwCa0LGWIcdK6S2p0"
+# Bot Configuration - Use environment variable for Render
+BOT_TOKEN = os.environ.get('BOT_TOKEN', '8422015788:AAF2HozDLDeDVMXD0HLwCa0LGWIcdK6S2p0')
 
 # Conversation states
 MAIN_MENU, UPLOADING_PHOTOS, ADDING_QUOTES = range(3)
+
+# Create Flask app for web server
+app = Flask(__name__)
+
+@app.route('/')
+def home():
+    return "🤖 Islamic Reels Bot is running!"
 
 class IslamicReelsBot:
     def __init__(self):
@@ -555,7 +564,22 @@ Use the buttons below!
         print("Bot is running! Press Ctrl+C to stop")
         app.run_polling()
 
+def run_flask():
+    """Run Flask app for web server"""
+    port = int(os.environ.get('PORT', 5000))
+    app.run(host='0.0.0.0', port=port)
+
 # Run the bot
 if __name__ == '__main__':
     bot = IslamicReelsBot()
-    bot.run_bot()
+    
+    # Start both bot and web server
+    import threading
+    
+    # Start bot in a separate thread
+    bot_thread = threading.Thread(target=bot.run_bot)
+    bot_thread.daemon = True
+    bot_thread.start()
+    
+    # Start Flask web server
+    run_flask()
