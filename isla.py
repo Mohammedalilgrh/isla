@@ -1,29 +1,28 @@
 import os
 import tempfile
+import asyncio
 from telegram import Update, ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, ConversationHandler, CallbackQueryHandler
+from telegram.constants import ParseMode
 from PIL import Image, ImageDraw, ImageFont
 import arabic_reshaper
 from bidi.algorithm import get_display
-import asyncio
-from flask import Flask
+from flask import Flask, request
 
-# Bot Configuration - Use environment variable for Render
-BOT_TOKEN = os.environ.get('BOT_TOKEN', '8422015788:AAF2HozDLDeDVMXD0HLwCa0LGWIcdK6S2p0')
+# Bot Configuration
+BOT_TOKEN = "8422015788:AAF2HozDLDeDVMXD0HLwCa0LGWIcdK6S2p0"
+RENDER_WEBHOOK_URL = "https://isla-ar8g.onrender.com"  # Your Render webhook URL
 
 # Conversation states
 MAIN_MENU, UPLOADING_PHOTOS, ADDING_QUOTES = range(3)
 
-# Create Flask app for web server
+# Flask app for webhook
 app = Flask(__name__)
-
-@app.route('/')
-def home():
-    return "🤖 Islamic Reels Bot is running!"
 
 class IslamicReelsBot:
     def __init__(self):
         self.user_sessions = {}
+        self.application = None
     
     def get_main_keyboard(self):
         """Create main menu buttons"""
@@ -62,6 +61,8 @@ class IslamicReelsBot:
 3. 🎬 *Make Reels* - Create images with quotes
 4. 📥 *Download* - Get all images
 
+*New Feature:* Upload 1 photo + multiple quotes = multiple reels!
+
 *يدعم اللغة العربية والحركات*
 *Supports Arabic with Harakat*
 
@@ -89,7 +90,7 @@ Use the buttons below!
             return MAIN_MENU
         
         await update.message.reply_text(
-            "📤 *Send your photos*:\n\nSend multiple photos one by one.\nClick '📝 Add Quotes' when done.",
+            "📤 *Send your photos*:\n\nSend multiple photos one by one.\nClick '📝 Add Quotes' when done.\n\n*Tip:* Upload 1 photo + multiple quotes to create multiple reels from the same image!",
             parse_mode='Markdown'
         )
         return UPLOADING_PHOTOS
@@ -152,6 +153,7 @@ Use the buttons below!
         await update.message.reply_text(
             f"📝 *Add your quotes*:\n\nYou have {photo_count} photos.\n"
             f"Send your quotes (one quote per line):\n\n"
+            f"*New Feature:* If you upload 1 photo and multiple quotes, you'll get multiple reels from the same image!\n\n"
             f"*يدعم اللغة العربية والحركات*\n"
             f"*Supports Arabic with Harakat*\n\n"
             f"Example Arabic:\n"
@@ -187,6 +189,7 @@ Use the buttons below!
             f"✅ *Quotes received!*\n\n"
             f"📷 Photos: {photo_count}\n"
             f"📝 Quotes: {len(quotes_list)}\n\n"
+            f"*Possible combinations:* {photo_count} photos × {len(quotes_list)} quotes = {photo_count * len(quotes_list)} possible reels!\n\n"
             f"Click '🎬 Make Reels' to create!",
             reply_markup=self.get_main_keyboard(),
             parse_mode='Markdown'
@@ -340,7 +343,7 @@ Use the buttons below!
             return image_path
     
     async def handle_make_reels(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Create images with quotes and send them with download buttons"""
+        """Create images with quotes - supports multiple quotes per photo"""
         user_id = update.effective_user.id
         
         if user_id not in self.user_sessions:
@@ -363,31 +366,35 @@ Use the buttons below!
         
         processing_msg = await update.message.reply_text("🔄 Creating your reels...")
         
-        # Process each photo with a quote
-        total = min(len(photos), len(quotes))
+        # NEW FEATURE: Create multiple combinations
+        # If user has 1 photo and multiple quotes, create multiple reels from same photo
+        total_combinations = len(photos) * len(quotes)
         created = 0
         
-        for i in range(total):
-            try:
-                await processing_msg.edit_text(f"🔄 Creating reel {i+1}/{total}...")
-                
-                photo_path = photos[i]['file_path']
-                quote = quotes[i % len(quotes)]
-                
-                # Create image with quote
-                result_path = self.create_image_with_quote(photo_path, quote)
-                
-                if result_path and os.path.exists(result_path):
-                    session['processed_images'].append({
-                        'image_path': result_path,
-                        'quote': quote,
-                        'index': i
-                    })
-                    created += 1
+        for photo_index, photo in enumerate(photos):
+            for quote_index, quote in enumerate(quotes):
+                try:
+                    current_index = created + 1
+                    await processing_msg.edit_text(f"🔄 Creating reel {current_index}/{total_combinations}...")
                     
-            except Exception as e:
-                print(f"Error with image {i}: {e}")
-                continue
+                    photo_path = photo['file_path']
+                    
+                    # Create image with quote
+                    result_path = self.create_image_with_quote(photo_path, quote)
+                    
+                    if result_path and os.path.exists(result_path):
+                        session['processed_images'].append({
+                            'image_path': result_path,
+                            'quote': quote,
+                            'photo_index': photo_index,
+                            'quote_index': quote_index,
+                            'index': created
+                        })
+                        created += 1
+                        
+                except Exception as e:
+                    print(f"Error with combination {photo_index}-{quote_index}: {e}")
+                    continue
         
         # Send all created reels with download buttons
         if created > 0:
@@ -397,9 +404,13 @@ Use the buttons below!
                 try:
                     if os.path.exists(img_data['image_path']):
                         with open(img_data['image_path'], 'rb') as f:
+                            caption = f"**Reel {i+1}**\n{img_data['quote']}"
+                            if len(photos) == 1 and len(quotes) > 1:
+                                caption += f"\n\n📷 Photo 1 • 📝 Quote {img_data['quote_index'] + 1}"
+                            
                             await update.message.reply_photo(
                                 photo=f,
-                                caption=f"**Reel {i+1}**\n{img_data['quote']}",
+                                caption=caption,
                                 reply_markup=self.get_download_keyboard(i),
                                 parse_mode='Markdown'
                             )
@@ -412,6 +423,10 @@ Use the buttons below!
             
             await update.message.reply_text(
                 f"🎉 *All {created} reels sent!*\n\n"
+                f"*Combination Summary:*\n"
+                f"📷 Photos: {len(photos)}\n"
+                f"📝 Quotes: {len(quotes)}\n"
+                f"🎬 Created: {created} reels\n\n"
                 f"Click the 📥 button under each reel to download it directly to your device!",
                 reply_markup=self.get_main_keyboard(),
                 parse_mode='Markdown'
@@ -461,7 +476,7 @@ Use the buttons below!
                 await query.message.reply_text("❌ Error downloading reel.")
     
     async def handle_download_all(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Download all reels as a zip file"""
+        """Download all reels as individual files"""
         user_id = update.effective_user.id
         
         if user_id not in self.user_sessions:
@@ -477,7 +492,7 @@ Use the buttons below!
             )
             return MAIN_MENU
         
-        status_msg = await update.message.reply_text("📦 Preparing all reels for download...")
+        status_msg = await update.message.reply_text(f"📦 Preparing {len(images)} reels for download...")
         
         # Send each reel as a downloadable document
         sent = 0
@@ -529,11 +544,8 @@ Use the buttons below!
         )
         return MAIN_MENU
     
-    def run_bot(self):
-        """Start the bot"""
-        # Create application
-        app = Application.builder().token(BOT_TOKEN).build()
-        
+    def setup_handlers(self):
+        """Setup Telegram bot handlers"""
         # Conversation handler
         conv_handler = ConversationHandler(
             entry_points=[CommandHandler('start', self.start)],
@@ -557,29 +569,57 @@ Use the buttons below!
         )
         
         # Add callback handler for download buttons
-        app.add_handler(CallbackQueryHandler(self.handle_download_callback, pattern="^download_"))
-        app.add_handler(conv_handler)
+        self.application.add_handler(CallbackQueryHandler(self.handle_download_callback, pattern="^download_"))
+        self.application.add_handler(conv_handler)
+    
+    def run_webhook(self):
+        """Run the bot with webhook for Render"""
+        # Create application
+        self.application = Application.builder().token(BOT_TOKEN).build()
+        
+        # Setup handlers
+        self.setup_handlers()
+        
+        # Set webhook
+        self.application.run_webhook(
+            listen="0.0.0.0",
+            port=int(os.environ.get("PORT", 8443)),
+            url_path=BOT_TOKEN,
+            webhook_url=f"{RENDER_WEBHOOK_URL}/{BOT_TOKEN}"
+        )
+    
+    def run_polling(self):
+        """Run the bot with polling (for local development)"""
+        # Create application
+        self.application = Application.builder().token(BOT_TOKEN).build()
+        
+        # Setup handlers
+        self.setup_handlers()
         
         print("🤖 Islamic Reels Bot Starting...")
         print("Bot is running! Press Ctrl+C to stop")
-        app.run_polling()
+        self.application.run_polling()
 
-def run_flask():
-    """Run Flask app for web server"""
-    port = int(os.environ.get('PORT', 5000))
-    app.run(host='0.0.0.0', port=port)
+# Create bot instance
+bot = IslamicReelsBot()
 
-# Run the bot
+# Flask routes for webhook
+@app.route('/')
+def home():
+    return "🤖 Islamic Reels Bot is running!"
+
+@app.route(f'/{BOT_TOKEN}', methods=['POST'])
+def webhook():
+    """Webhook route for Telegram"""
+    update = Update.de_json(request.get_json(force=True), bot.application.bot)
+    bot.application.update_queue.put(update)
+    return 'OK'
+
 if __name__ == '__main__':
-    bot = IslamicReelsBot()
-    
-    # Start both bot and web server
-    import threading
-    
-    # Start bot in a separate thread
-    bot_thread = threading.Thread(target=bot.run_bot)
-    bot_thread.daemon = True
-    bot_thread.start()
-    
-    # Start Flask web server
-    run_flask()
+    # Check if running on Render (with PORT environment variable)
+    if os.environ.get('RENDER', None):
+        print("🚀 Starting bot with webhook...")
+        bot.run_webhook()
+    else:
+        print("🔧 Starting bot with polling...")
+        bot.run_polling()
