@@ -204,39 +204,104 @@ Use the buttons below!
         arabic_range = range(0x0600, 0x06FF)  # Arabic Unicode range
         return any(ord(char) in arabic_range for char in text)
     
-    def process_arabic_line(self, line):
-        """Process a single line of Arabic text with proper reshaping and bidirectional support"""
+    def get_arabic_font(self, size):
+        """Get Arabic-compatible font with fallbacks"""
+        # Try different font paths
+        font_paths = [
+            # Common Arabic fonts on different systems
+            "fonts/arial.ttf",
+            "fonts/tahoma.ttf", 
+            "fonts/times.ttf",
+            "arial.ttf",
+            "tahoma.ttf",
+            "times.ttf",
+            "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+            "/System/Library/Fonts/Arial.ttf",
+            "C:/Windows/Fonts/arial.ttf"
+        ]
+        
+        for font_path in font_paths:
+            try:
+                return ImageFont.truetype(font_path, size)
+            except Exception as e:
+                continue
+        
+        # Final fallback
+        try:
+            return ImageFont.truetype("arial.ttf", size)
+        except:
+            return ImageFont.load_default()
+    
+    def process_arabic_text(self, text):
+        """Process Arabic text with proper reshaping and bidirectional support"""
         try:
             # Reshape Arabic text for proper display
-            reshaped_text = arabic_reshaper.reshape(line)
+            reshaped_text = arabic_reshaper.reshape(text)
             # Apply bidirectional algorithm for RTL display
             processed_text = get_display(reshaped_text)
             return processed_text
-        except:
-            # Fallback if processing fails
-            return line
+        except Exception as e:
+            logger.error(f"Error processing Arabic text: {e}")
+            return text
     
-    def split_text_into_lines(self, text, font, max_width):
-        """Split text into lines that fit within max_width, preserving line breaks"""
+    def split_arabic_text(self, text, font, max_width):
+        """Split Arabic text into lines that fit within max_width"""
         lines = []
         
-        # First, split by actual line breaks to preserve user's intended structure
-        original_lines = text.split('\n')
+        # Process the entire text first
+        processed_text = self.process_arabic_text(text)
         
-        for original_line in original_lines:
-            if not original_line.strip():
+        # Split by user's line breaks first
+        user_lines = processed_text.split('\n')
+        
+        for user_line in user_lines:
+            if not user_line.strip():
                 lines.append('')
                 continue
                 
-            words = original_line.split()
+            words = user_line.split()
+            current_line = ""
+            
+            for word in words:
+                # Test if adding this word exceeds max width
+                test_line = current_line + " " + word if current_line else word
+                bbox = font.getbbox(test_line)
+                line_width = bbox[2] - bbox[0]
+                
+                if line_width <= max_width:
+                    current_line = test_line
+                else:
+                    if current_line:
+                        lines.append(current_line.strip())
+                    current_line = word
+            
+            if current_line:
+                lines.append(current_line.strip())
+        
+        return lines
+    
+    def split_english_text(self, text, font, max_width):
+        """Split English text into lines that fit within max_width"""
+        lines = []
+        
+        # Split by user's line breaks first
+        user_lines = text.split('\n')
+        
+        for user_line in user_lines:
+            if not user_line.strip():
+                lines.append('')
+                continue
+                
+            words = user_line.split()
             current_line = []
             
             for word in words:
                 test_line = ' '.join(current_line + [word])
                 bbox = font.getbbox(test_line)
-                text_width = bbox[2] - bbox[0]
+                line_width = bbox[2] - bbox[0]
                 
-                if text_width < max_width:
+                if line_width <= max_width:
                     current_line.append(word)
                 else:
                     if current_line:
@@ -273,86 +338,74 @@ Use the buttons below!
             # Check if text is Arabic
             is_arabic = self.is_arabic_text(quote)
             
-            # Choose font based on text language
+            # Choose font and size based on language
             if is_arabic:
-                # Arabic font - try different Arabic fonts
-                arabic_fonts = [
-                    "arial.ttf",  # Some versions support Arabic
-                    "tahoma.ttf",
-                    "seguiui.ttf", 
-                    "simpo.ttf",
-                    "arialuni.ttf"
-                ]
-                font = None
-                for font_path in arabic_fonts:
-                    try:
-                        font = ImageFont.truetype(font_path, 48)  # Larger font for Arabic
-                        break
-                    except:
-                        continue
-                if font is None:
-                    # Fallback to default font
-                    font = ImageFont.load_default()
-                
-                # Process Arabic text line by line to maintain correct order
-                lines = self.split_text_into_lines(quote, font, width * 0.8)
-                # Process each line individually for proper Arabic display
-                processed_lines = [self.process_arabic_line(line) for line in lines]
+                # Use larger font for Arabic
+                font_size = 65  # Much larger for Arabic
+                font = self.get_arabic_font(font_size)
+                # Split text into lines
+                lines = self.split_arabic_text(quote, font, width * 0.75)
             else:
-                # English/other languages font
+                # English text
+                font_size = 55  # Larger for English too
                 try:
-                    font = ImageFont.truetype("arial.ttf", 45)
+                    font = ImageFont.truetype("arial.ttf", font_size)
                 except:
                     font = ImageFont.load_default()
-                lines = self.split_text_into_lines(quote, font, width * 0.8)
-                processed_lines = lines
+                lines = self.split_english_text(quote, font, width * 0.75)
             
             # Calculate text position - CENTER of the image
-            line_height = 70 if is_arabic else 60  # More space for Arabic text
-            total_height = len(processed_lines) * line_height
+            line_height = 85 if is_arabic else 75  # More space between lines
+            total_height = len(lines) * line_height
             text_y = (height - total_height) // 2  # Center vertically
             
             # Draw semi-transparent background for text
-            padding = 30
+            padding = 40
             bg_height = total_height + (padding * 2)
-            bg_width = width - 80  # Wider background for better Arabic display
+            bg_width = width - 100  # Wider background
             bg_x = (width - bg_width) // 2
             bg_y = text_y - padding
             
-            # Create transparent overlay
-            overlay = Image.new('RGBA', (bg_width, bg_height), (0, 0, 0, 180))
+            # Create transparent overlay for better text readability
+            overlay = Image.new('RGBA', (bg_width, bg_height), (0, 0, 0, 200))  # Darker background
             background.paste(overlay, (bg_x, bg_y), overlay)
             
             # Draw text - maintaining the original line order
-            for i, line in enumerate(processed_lines):
+            for i, line in enumerate(lines):
                 if not line.strip():  # Skip empty lines
                     continue
-                    
+                
                 bbox = draw.textbbox((0, 0), line, font=font)
                 text_width = bbox[2] - bbox[0]
                 
                 if is_arabic:
                     # For Arabic (RTL), align to the right within the background
-                    x_pos = bg_x + bg_width - text_width - 20
+                    x_pos = bg_x + bg_width - text_width - 30
                 else:
                     # For English (LTR), center the text
                     x_pos = (width - text_width) // 2
                 
                 y_pos = text_y + (i * line_height)
                 
-                # Text shadow for better readability
-                draw.text((x_pos+3, y_pos+3), line, font=font, fill=(0, 0, 0, 200))
-                # Main text (white)
+                # Text shadow for better readability (thicker shadow)
+                shadow_offset = 4
+                for dx in [-shadow_offset, 0, shadow_offset]:
+                    for dy in [-shadow_offset, 0, shadow_offset]:
+                        if dx != 0 or dy != 0:
+                            draw.text((x_pos + dx, y_pos + dy), line, font=font, fill=(0, 0, 0, 150))
+                
+                # Main text (bright white)
                 draw.text((x_pos, y_pos), line, font=font, fill=(255, 255, 255))
             
-            # Save result
+            # Save result with high quality
             output_path = tempfile.mktemp(suffix='_quote.jpg')
-            background.save(output_path, quality=95)
+            background.save(output_path, quality=95, optimize=True)
             
             return output_path
             
         except Exception as e:
             logger.error(f"Error creating image: {e}")
+            # Fallback: return original image if processing fails
             return image_path
     
     async def handle_make_reels(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
