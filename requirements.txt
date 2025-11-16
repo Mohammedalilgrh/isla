@@ -1,6 +1,7 @@
 python-telegram-bot
 Pillow
-arabic-reshaper
+arabic-reshaper==3.0.0
 python-bidi
 Flask
 gunicorn
+python-bidi==0.4.2
