@@ -204,25 +204,21 @@ Use the buttons below!
         arabic_range = range(0x0600, 0x06FF)  # Arabic Unicode range
         return any(ord(char) in arabic_range for char in text)
     
-    def process_arabic_text(self, text):
-        """Process Arabic text with proper reshaping and bidirectional support"""
+    def process_arabic_line(self, line):
+        """Process a single line of Arabic text with proper reshaping and bidirectional support"""
         try:
             # Reshape Arabic text for proper display
-            reshaped_text = arabic_reshaper.reshape(text)
+            reshaped_text = arabic_reshaper.reshape(line)
             # Apply bidirectional algorithm for RTL display
             processed_text = get_display(reshaped_text)
             return processed_text
-        except Exception as e:
-            logger.error(f"Error processing Arabic text: {e}")
-            return text
+        except:
+            # Fallback if processing fails
+            return line
     
-    def split_text_into_lines(self, text, font, max_width, is_arabic=False):
-        """Split text into lines that fit within max_width"""
+    def split_text_into_lines(self, text, font, max_width):
+        """Split text into lines that fit within max_width, preserving line breaks"""
         lines = []
-        
-        # Process Arabic text first
-        if is_arabic:
-            text = self.process_arabic_text(text)
         
         # First, split by actual line breaks to preserve user's intended structure
         original_lines = text.split('\n')
@@ -231,72 +227,26 @@ Use the buttons below!
             if not original_line.strip():
                 lines.append('')
                 continue
+                
+            words = original_line.split()
+            current_line = []
             
-            if is_arabic:
-                # For Arabic, we need to split differently due to RTL
-                current_line = ""
-                words = original_line.split()
+            for word in words:
+                test_line = ' '.join(current_line + [word])
+                bbox = font.getbbox(test_line)
+                text_width = bbox[2] - bbox[0]
                 
-                for word in words:
-                    test_line = current_line + " " + word if current_line else word
-                    # For Arabic, we need to process the test line for accurate measurement
-                    test_line_processed = self.process_arabic_text(test_line)
-                    bbox = font.getbbox(test_line_processed)
-                    text_width = bbox[2] - bbox[0]
-                    
-                    if text_width < max_width:
-                        current_line = test_line
-                    else:
-                        if current_line:
-                            lines.append(current_line.strip())
-                        current_line = word
-                
-                if current_line:
-                    lines.append(current_line.strip())
-            else:
-                # For English/other LTR languages
-                words = original_line.split()
-                current_line = []
-                
-                for word in words:
-                    test_line = ' '.join(current_line + [word])
-                    bbox = font.getbbox(test_line)
-                    text_width = bbox[2] - bbox[0]
-                    
-                    if text_width < max_width:
-                        current_line.append(word)
-                    else:
-                        if current_line:
-                            lines.append(' '.join(current_line))
-                        current_line = [word]
-                
-                if current_line:
-                    lines.append(' '.join(current_line))
+                if text_width < max_width:
+                    current_line.append(word)
+                else:
+                    if current_line:
+                        lines.append(' '.join(current_line))
+                    current_line = [word]
+            
+            if current_line:
+                lines.append(' '.join(current_line))
         
         return lines
-    
-    def get_arabic_font(self, size):
-        """Get Arabic-compatible font with fallbacks"""
-        arabic_fonts = [
-            "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
-            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-            "/System/Library/Fonts/Arial.ttf",
-            "arial.ttf",
-            "tahoma.ttf",
-            "times.ttf"
-        ]
-        
-        for font_path in arabic_fonts:
-            try:
-                return ImageFont.truetype(font_path, size)
-            except:
-                continue
-        
-        # Fallback to default font
-        try:
-            return ImageFont.truetype("arial.ttf", size)
-        except:
-            return ImageFont.load_default()
     
     def create_image_with_quote(self, image_path, quote):
         """Create beautiful image with quote in the MIDDLE - supports Arabic with correct line order"""
@@ -325,44 +275,59 @@ Use the buttons below!
             
             # Choose font based on text language
             if is_arabic:
-                font = self.get_arabic_font(48)  # Larger font for Arabic
-                # Process the entire Arabic text first
-                processed_quote = self.process_arabic_text(quote)
+                # Arabic font - try different Arabic fonts
+                arabic_fonts = [
+                    "arial.ttf",  # Some versions support Arabic
+                    "tahoma.ttf",
+                    "seguiui.ttf", 
+                    "simpo.ttf",
+                    "arialuni.ttf"
+                ]
+                font = None
+                for font_path in arabic_fonts:
+                    try:
+                        font = ImageFont.truetype(font_path, 48)  # Larger font for Arabic
+                        break
+                    except:
+                        continue
+                if font is None:
+                    # Fallback to default font
+                    font = ImageFont.load_default()
+                
+                # Process Arabic text line by line to maintain correct order
+                lines = self.split_text_into_lines(quote, font, width * 0.8)
+                # Process each line individually for proper Arabic display
+                processed_lines = [self.process_arabic_line(line) for line in lines]
             else:
+                # English/other languages font
                 try:
                     font = ImageFont.truetype("arial.ttf", 45)
                 except:
                     font = ImageFont.load_default()
-                processed_quote = quote
-            
-            # Split text into lines
-            lines = self.split_text_into_lines(processed_quote, font, width * 0.85, is_arabic)
+                lines = self.split_text_into_lines(quote, font, width * 0.8)
+                processed_lines = lines
             
             # Calculate text position - CENTER of the image
-            line_height = 70 if is_arabic else 60  # More space for Arabic
-            total_height = len(lines) * line_height
+            line_height = 70 if is_arabic else 60  # More space for Arabic text
+            total_height = len(processed_lines) * line_height
             text_y = (height - total_height) // 2  # Center vertically
             
             # Draw semi-transparent background for text
             padding = 30
             bg_height = total_height + (padding * 2)
-            bg_width = width - 80
+            bg_width = width - 80  # Wider background for better Arabic display
             bg_x = (width - bg_width) // 2
             bg_y = text_y - padding
             
-            # Create transparent overlay for better text readability
+            # Create transparent overlay
             overlay = Image.new('RGBA', (bg_width, bg_height), (0, 0, 0, 180))
             background.paste(overlay, (bg_x, bg_y), overlay)
             
             # Draw text - maintaining the original line order
-            for i, line in enumerate(lines):
+            for i, line in enumerate(processed_lines):
                 if not line.strip():  # Skip empty lines
                     continue
-                
-                # For Arabic, we need to process each line individually
-                if is_arabic:
-                    line = self.process_arabic_text(line)
-                
+                    
                 bbox = draw.textbbox((0, 0), line, font=font)
                 text_width = bbox[2] - bbox[0]
                 
@@ -376,9 +341,7 @@ Use the buttons below!
                 y_pos = text_y + (i * line_height)
                 
                 # Text shadow for better readability
-                shadow_offset = 3
-                draw.text((x_pos + shadow_offset, y_pos + shadow_offset), line, font=font, fill=(0, 0, 0, 200))
-                
+                draw.text((x_pos+3, y_pos+3), line, font=font, fill=(0, 0, 0, 200))
                 # Main text (white)
                 draw.text((x_pos, y_pos), line, font=font, fill=(255, 255, 255))
             
@@ -390,7 +353,6 @@ Use the buttons below!
             
         except Exception as e:
             logger.error(f"Error creating image: {e}")
-            # Fallback: return original image if processing fails
             return image_path
     
     async def handle_make_reels(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
