@@ -2,5 +2,5 @@ python-telegram-bot
 Pillow
 arabic-reshaper
 python-bidi
-flask
+Flask
 gunicorn
