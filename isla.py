@@ -1,28 +1,30 @@
 import os
 import tempfile
 import asyncio
+import threading
 from telegram import Update, ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, ConversationHandler, CallbackQueryHandler
-from telegram.constants import ParseMode
 from PIL import Image, ImageDraw, ImageFont
 import arabic_reshaper
 from bidi.algorithm import get_display
-from flask import Flask, request
+import logging
+
+# Set up logging
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.INFO
+)
+logger = logging.getLogger(__name__)
 
 # Bot Configuration
 BOT_TOKEN = "8422015788:AAF2HozDLDeDVMXD0HLwCa0LGWIcdK6S2p0"
-RENDER_WEBHOOK_URL = "https://isla-ar8g.onrender.com"  # Your Render webhook URL
 
 # Conversation states
 MAIN_MENU, UPLOADING_PHOTOS, ADDING_QUOTES = range(3)
 
-# Flask app for webhook
-app = Flask(__name__)
-
 class IslamicReelsBot:
     def __init__(self):
         self.user_sessions = {}
-        self.application = None
     
     def get_main_keyboard(self):
         """Create main menu buttons"""
@@ -126,6 +128,7 @@ Use the buttons below!
                 )
                 
             except Exception as e:
+                logger.error(f"Error uploading photo: {e}")
                 await update.message.reply_text(
                     "❌ Error uploading photo. Try again.",
                     reply_markup=self.get_main_keyboard()
@@ -209,7 +212,8 @@ Use the buttons below!
             # Apply bidirectional algorithm for RTL display
             processed_text = get_display(reshaped_text)
             return processed_text
-        except:
+        except Exception as e:
+            logger.error(f"Error processing Arabic text: {e}")
             # Fallback if processing fails
             return line
     
@@ -339,7 +343,7 @@ Use the buttons below!
             return output_path
             
         except Exception as e:
-            print(f"Error creating image: {e}")
+            logger.error(f"Error creating image: {e}")
             return image_path
     
     async def handle_make_reels(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -393,7 +397,7 @@ Use the buttons below!
                         created += 1
                         
                 except Exception as e:
-                    print(f"Error with combination {photo_index}-{quote_index}: {e}")
+                    logger.error(f"Error with combination {photo_index}-{quote_index}: {e}")
                     continue
         
         # Send all created reels with download buttons
@@ -418,7 +422,7 @@ Use the buttons below!
                         await asyncio.sleep(1)
                         
                 except Exception as e:
-                    print(f"Error sending reel {i}: {e}")
+                    logger.error(f"Error sending reel {i}: {e}")
                     continue
             
             await update.message.reply_text(
@@ -472,7 +476,7 @@ Use the buttons below!
                 await query.message.reply_text("❌ Could not download this reel.")
                 
             except Exception as e:
-                print(f"Download error: {e}")
+                logger.error(f"Download error: {e}")
                 await query.message.reply_text("❌ Error downloading reel.")
     
     async def handle_download_all(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -508,7 +512,7 @@ Use the buttons below!
                     sent += 1
                     await asyncio.sleep(1)  # Avoid rate limits
             except Exception as e:
-                print(f"Error sending reel {i}: {e}")
+                logger.error(f"Error sending reel {i}: {e}")
                 continue
         
         await status_msg.edit_text(f"✅ Sent {sent} reels as downloadable files!")
@@ -543,83 +547,54 @@ Use the buttons below!
             reply_markup=self.get_main_keyboard()
         )
         return MAIN_MENU
+
+def run_bot():
+    """Run the bot with polling"""
+    bot = IslamicReelsBot()
     
-    def setup_handlers(self):
-        """Setup Telegram bot handlers"""
-        # Conversation handler
-        conv_handler = ConversationHandler(
-            entry_points=[CommandHandler('start', self.start)],
-            states={
-                MAIN_MENU: [
-                    MessageHandler(filters.Regex('^📤 Upload Photos$'), self.handle_upload_photos),
-                    MessageHandler(filters.Regex('^📝 Add Quotes$'), self.handle_add_quotes),
-                    MessageHandler(filters.Regex('^🎬 Make Reels$'), self.handle_make_reels),
-                    MessageHandler(filters.Regex('^📥 Download All$'), self.handle_download_all),
-                    MessageHandler(filters.Regex('^🔄 Reset$'), self.handle_reset),
-                ],
-                UPLOADING_PHOTOS: [
-                    MessageHandler(filters.PHOTO, self.handle_photos),
-                    MessageHandler(filters.Regex('^📝 Add Quotes$'), self.handle_add_quotes),
-                ],
-                ADDING_QUOTES: [
-                    MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_quotes)
-                ]
-            },
-            fallbacks=[CommandHandler('start', self.start)]
-        )
-        
-        # Add callback handler for download buttons
-        self.application.add_handler(CallbackQueryHandler(self.handle_download_callback, pattern="^download_"))
-        self.application.add_handler(conv_handler)
+    # Create application
+    application = Application.builder().token(BOT_TOKEN).build()
     
-    def run_webhook(self):
-        """Run the bot with webhook for Render"""
-        # Create application
-        self.application = Application.builder().token(BOT_TOKEN).build()
-        
-        # Setup handlers
-        self.setup_handlers()
-        
-        # Set webhook
-        self.application.run_webhook(
-            listen="0.0.0.0",
-            port=int(os.environ.get("PORT", 8443)),
-            url_path=BOT_TOKEN,
-            webhook_url=f"{RENDER_WEBHOOK_URL}/{BOT_TOKEN}"
-        )
+    # Conversation handler
+    conv_handler = ConversationHandler(
+        entry_points=[CommandHandler('start', bot.start)],
+        states={
+            MAIN_MENU: [
+                MessageHandler(filters.Regex('^📤 Upload Photos$'), bot.handle_upload_photos),
+                MessageHandler(filters.Regex('^📝 Add Quotes$'), bot.handle_add_quotes),
+                MessageHandler(filters.Regex('^🎬 Make Reels$'), bot.handle_make_reels),
+                MessageHandler(filters.Regex('^📥 Download All$'), bot.handle_download_all),
+                MessageHandler(filters.Regex('^🔄 Reset$'), bot.handle_reset),
+            ],
+            UPLOADING_PHOTOS: [
+                MessageHandler(filters.PHOTO, bot.handle_photos),
+                MessageHandler(filters.Regex('^📝 Add Quotes$'), bot.handle_add_quotes),
+            ],
+            ADDING_QUOTES: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, bot.handle_quotes)
+            ]
+        },
+        fallbacks=[CommandHandler('start', bot.start)]
+    )
     
-    def run_polling(self):
-        """Run the bot with polling (for local development)"""
-        # Create application
-        self.application = Application.builder().token(BOT_TOKEN).build()
-        
-        # Setup handlers
-        self.setup_handlers()
-        
-        print("🤖 Islamic Reels Bot Starting...")
-        print("Bot is running! Press Ctrl+C to stop")
-        self.application.run_polling()
+    # Add callback handler for download buttons
+    application.add_handler(CallbackQueryHandler(bot.handle_download_callback, pattern="^download_"))
+    application.add_handler(conv_handler)
+    
+    print("🤖 Islamic Reels Bot Starting...")
+    print("Bot is running with polling! Press Ctrl+C to stop")
+    
+    # Start the bot
+    application.run_polling()
 
-# Create bot instance
-bot = IslamicReelsBot()
-
-# Flask routes for webhook
-@app.route('/')
-def home():
-    return "🤖 Islamic Reels Bot is running!"
-
-@app.route(f'/{BOT_TOKEN}', methods=['POST'])
-def webhook():
-    """Webhook route for Telegram"""
-    update = Update.de_json(request.get_json(force=True), bot.application.bot)
-    bot.application.update_queue.put(update)
-    return 'OK'
-
+# For Render deployment
 if __name__ == '__main__':
-    # Check if running on Render (with PORT environment variable)
-    if os.environ.get('RENDER', None):
-        print("🚀 Starting bot with webhook...")
-        bot.run_webhook()
+    # Check if we're on Render (has PORT environment variable)
+    if os.environ.get('RENDER'):
+        print("🚀 Starting bot on Render...")
+        # On Render, run the bot directly
+        run_bot()
     else:
-        print("🔧 Starting bot with polling...")
-        bot.run_polling()
+        # Local development
+        print("🔧 Starting bot locally...")
+        run_bot()
