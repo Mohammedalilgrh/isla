@@ -8,6 +8,7 @@ from PIL import Image, ImageDraw, ImageFont
 import arabic_reshaper
 from bidi.algorithm import get_display
 import logging
+import requests
 
 # Set up logging
 logging.basicConfig(
@@ -25,6 +26,38 @@ MAIN_MENU, UPLOADING_PHOTOS, ADDING_QUOTES = range(3)
 class IslamicReelsBot:
     def __init__(self):
         self.user_sessions = {}
+        self.setup_fonts()
+    
+    def setup_fonts(self):
+        """Setup Arabic fonts"""
+        try:
+            # Create fonts directory if it doesn't exist
+            os.makedirs('fonts', exist_ok=True)
+            
+            # Download basic fonts if they don't exist
+            self.download_fonts()
+            
+        except Exception as e:
+            logger.error(f"Error setting up fonts: {e}")
+    
+    def download_fonts(self):
+        """Download basic Arabic fonts"""
+        font_urls = {
+            'amiri': 'https://github.com/alif-type/amiri/releases/download/0.113/amiri-0.113.zip',
+            'noto': 'https://github.com/googlefonts/noto-fonts/raw/main/hinted/ttf/NotoNaskhArabic/NotoNaskhArabic-Regular.ttf'
+        }
+        
+        for name, url in font_urls.items():
+            font_path = f'fonts/{name}.ttf'
+            if not os.path.exists(font_path):
+                try:
+                    response = requests.get(url, timeout=10)
+                    if response.status_code == 200:
+                        with open(font_path, 'wb') as f:
+                            f.write(response.content)
+                        logger.info(f"Downloaded {name} font")
+                except Exception as e:
+                    logger.error(f"Failed to download {name} font: {e}")
     
     def get_main_keyboard(self):
         """Create main menu buttons"""
@@ -206,28 +239,27 @@ Use the buttons below!
     
     def get_arabic_font(self, size):
         """Get Arabic-compatible font with fallbacks"""
-        # Try different font paths
-        font_paths = [
-            # Common Arabic fonts on different systems
-            "fonts/arial.ttf",
-            "fonts/tahoma.ttf", 
-            "fonts/times.ttf",
-            "arial.ttf",
-            "tahoma.ttf",
-            "times.ttf",
-            "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
-            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-            "/System/Library/Fonts/Arial.ttf",
-            "C:/Windows/Fonts/arial.ttf"
+        # Try different Arabic fonts
+        arabic_fonts = [
+            'fonts/amiri.ttf',
+            'fonts/noto.ttf',
+            'fonts/tahoma.ttf',
+            'fonts/arial.ttf',
+            '/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf',
+            '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
+            'arial.ttf',
+            'tahoma.ttf'
         ]
         
-        for font_path in font_paths:
+        for font_path in arabic_fonts:
             try:
-                return ImageFont.truetype(font_path, size)
+                if os.path.exists(font_path):
+                    return ImageFont.truetype(font_path, size)
             except Exception as e:
                 continue
         
-        # Final fallback
+        # Ultimate fallback - use default font
+        logger.warning("No Arabic fonts found, using default font")
         try:
             return ImageFont.truetype("arial.ttf", size)
         except:
@@ -236,21 +268,29 @@ Use the buttons below!
     def process_arabic_text(self, text):
         """Process Arabic text with proper reshaping and bidirectional support"""
         try:
+            # Configure arabic_reshaper for better support
+            arabic_reshaper.config.forget_letters()
+            
             # Reshape Arabic text for proper display
             reshaped_text = arabic_reshaper.reshape(text)
+            
             # Apply bidirectional algorithm for RTL display
             processed_text = get_display(reshaped_text)
+            
             return processed_text
         except Exception as e:
             logger.error(f"Error processing Arabic text: {e}")
             return text
     
-    def split_arabic_text(self, text, font, max_width):
-        """Split Arabic text into lines that fit within max_width"""
+    def split_text_to_lines(self, text, font, max_width, is_arabic=False):
+        """Split text into lines that fit within max_width"""
         lines = []
         
-        # Process the entire text first
-        processed_text = self.process_arabic_text(text)
+        # Process Arabic text
+        if is_arabic:
+            processed_text = self.process_arabic_text(text)
+        else:
+            processed_text = text
         
         # Split by user's line breaks first
         user_lines = processed_text.split('\n')
@@ -259,49 +299,25 @@ Use the buttons below!
             if not user_line.strip():
                 lines.append('')
                 continue
-                
-            words = user_line.split()
-            current_line = ""
             
-            for word in words:
-                # Test if adding this word exceeds max width
-                test_line = current_line + " " + word if current_line else word
-                bbox = font.getbbox(test_line)
-                line_width = bbox[2] - bbox[0]
-                
-                if line_width <= max_width:
-                    current_line = test_line
-                else:
-                    if current_line:
-                        lines.append(current_line.strip())
-                    current_line = word
-            
-            if current_line:
-                lines.append(current_line.strip())
-        
-        return lines
-    
-    def split_english_text(self, text, font, max_width):
-        """Split English text into lines that fit within max_width"""
-        lines = []
-        
-        # Split by user's line breaks first
-        user_lines = text.split('\n')
-        
-        for user_line in user_lines:
-            if not user_line.strip():
-                lines.append('')
-                continue
-                
             words = user_line.split()
             current_line = []
             
             for word in words:
-                test_line = ' '.join(current_line + [word])
-                bbox = font.getbbox(test_line)
-                line_width = bbox[2] - bbox[0]
+                # Test line with new word
+                test_line = ' '.join(current_line + [word]) if not is_arabic else ' '.join(current_line + [word])
                 
-                if line_width <= max_width:
+                # For Arabic, we need to process the test line for accurate measurement
+                if is_arabic:
+                    test_line_processed = self.process_arabic_text(test_line)
+                else:
+                    test_line_processed = test_line
+                
+                # Get text dimensions
+                bbox = font.getbbox(test_line_processed)
+                text_width = bbox[2] - bbox[0]
+                
+                if text_width <= max_width:
                     current_line.append(word)
                 else:
                     if current_line:
@@ -341,71 +357,71 @@ Use the buttons below!
             # Choose font and size based on language
             if is_arabic:
                 # Use larger font for Arabic
-                font_size = 65  # Much larger for Arabic
+                font_size = 60
                 font = self.get_arabic_font(font_size)
-                # Split text into lines
-                lines = self.split_arabic_text(quote, font, width * 0.75)
             else:
                 # English text
-                font_size = 55  # Larger for English too
+                font_size = 50
                 try:
                     font = ImageFont.truetype("arial.ttf", font_size)
                 except:
                     font = ImageFont.load_default()
-                lines = self.split_english_text(quote, font, width * 0.75)
+            
+            # Split text into lines
+            lines = self.split_text_to_lines(quote, font, width * 0.8, is_arabic)
             
             # Calculate text position - CENTER of the image
-            line_height = 85 if is_arabic else 75  # More space between lines
+            line_height = 80 if is_arabic else 70
             total_height = len(lines) * line_height
-            text_y = (height - total_height) // 2  # Center vertically
+            text_y = (height - total_height) // 2
             
             # Draw semi-transparent background for text
             padding = 40
             bg_height = total_height + (padding * 2)
-            bg_width = width - 100  # Wider background
+            bg_width = width - 100
             bg_x = (width - bg_width) // 2
             bg_y = text_y - padding
             
-            # Create transparent overlay for better text readability
-            overlay = Image.new('RGBA', (bg_width, bg_height), (0, 0, 0, 200))  # Darker background
+            # Create transparent overlay
+            overlay = Image.new('RGBA', (bg_width, bg_height), (0, 0, 0, 180))
             background.paste(overlay, (bg_x, bg_y), overlay)
             
-            # Draw text - maintaining the original line order
+            # Draw text lines
             for i, line in enumerate(lines):
-                if not line.strip():  # Skip empty lines
+                if not line.strip():
                     continue
                 
+                # Process Arabic line
+                if is_arabic:
+                    line = self.process_arabic_text(line)
+                
+                # Get text dimensions
                 bbox = draw.textbbox((0, 0), line, font=font)
                 text_width = bbox[2] - bbox[0]
                 
+                # Calculate x position based on language
                 if is_arabic:
-                    # For Arabic (RTL), align to the right within the background
-                    x_pos = bg_x + bg_width - text_width - 30
+                    x_pos = bg_x + bg_width - text_width - 40  # Right alignment for Arabic
                 else:
-                    # For English (LTR), center the text
-                    x_pos = (width - text_width) // 2
+                    x_pos = (width - text_width) // 2  # Center alignment for English
                 
                 y_pos = text_y + (i * line_height)
                 
-                # Text shadow for better readability (thicker shadow)
-                shadow_offset = 4
-                for dx in [-shadow_offset, 0, shadow_offset]:
-                    for dy in [-shadow_offset, 0, shadow_offset]:
-                        if dx != 0 or dy != 0:
-                            draw.text((x_pos + dx, y_pos + dy), line, font=font, fill=(0, 0, 0, 150))
+                # Draw text shadow
+                shadow_offset = 3
+                draw.text((x_pos + shadow_offset, y_pos + shadow_offset), line, font=font, fill=(0, 0, 0, 200))
                 
-                # Main text (bright white)
+                # Draw main text
                 draw.text((x_pos, y_pos), line, font=font, fill=(255, 255, 255))
             
-            # Save result with high quality
+            # Save result
             output_path = tempfile.mktemp(suffix='_quote.jpg')
-            background.save(output_path, quality=95, optimize=True)
+            background.save(output_path, quality=95)
             
             return output_path
             
         except Exception as e:
             logger.error(f"Error creating image: {e}")
-            # Fallback: return original image if processing fails
             return image_path
     
     async def handle_make_reels(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -432,8 +448,7 @@ Use the buttons below!
         
         processing_msg = await update.message.reply_text("🔄 Creating your reels...")
         
-        # NEW FEATURE: Create multiple combinations
-        # If user has 1 photo and multiple quotes, create multiple reels from same photo
+        # Create multiple combinations
         total_combinations = len(photos) * len(quotes)
         created = 0
         
@@ -480,7 +495,6 @@ Use the buttons below!
                                 reply_markup=self.get_download_keyboard(i),
                                 parse_mode='Markdown'
                             )
-                        # Small delay to avoid rate limits
                         await asyncio.sleep(1)
                         
                 except Exception as e:
@@ -525,7 +539,6 @@ Use the buttons below!
                         img_data = images[image_index]
                         
                         if os.path.exists(img_data['image_path']):
-                            # Send the image as a document (so user can download it directly)
                             with open(img_data['image_path'], 'rb') as f:
                                 await query.message.reply_document(
                                     document=f,
@@ -560,7 +573,6 @@ Use the buttons below!
         
         status_msg = await update.message.reply_text(f"📦 Preparing {len(images)} reels for download...")
         
-        # Send each reel as a downloadable document
         sent = 0
         for i, img_data in enumerate(images):
             try:
@@ -572,7 +584,7 @@ Use the buttons below!
                             caption=f"Reel {i+1}\n{img_data['quote']}"
                         )
                     sent += 1
-                    await asyncio.sleep(1)  # Avoid rate limits
+                    await asyncio.sleep(1)
             except Exception as e:
                 logger.error(f"Error sending reel {i}: {e}")
                 continue
@@ -585,7 +597,6 @@ Use the buttons below!
         user_id = update.effective_user.id
         
         if user_id in self.user_sessions:
-            # Cleanup files
             session = self.user_sessions[user_id]
             for photo in session['photos']:
                 try:
@@ -601,7 +612,6 @@ Use the buttons below!
                 except:
                     pass
             
-            # Reset session
             self.user_sessions[user_id] = {'photos': [], 'quotes': [], 'processed_images': []}
         
         await update.message.reply_text(
@@ -614,10 +624,8 @@ def run_bot():
     """Run the bot with polling"""
     bot = IslamicReelsBot()
     
-    # Create application
     application = Application.builder().token(BOT_TOKEN).build()
     
-    # Conversation handler
     conv_handler = ConversationHandler(
         entry_points=[CommandHandler('start', bot.start)],
         states={
@@ -639,24 +647,18 @@ def run_bot():
         fallbacks=[CommandHandler('start', bot.start)]
     )
     
-    # Add callback handler for download buttons
     application.add_handler(CallbackQueryHandler(bot.handle_download_callback, pattern="^download_"))
     application.add_handler(conv_handler)
     
     print("🤖 Islamic Reels Bot Starting...")
     print("Bot is running with polling! Press Ctrl+C to stop")
     
-    # Start the bot
     application.run_polling()
 
-# For Render deployment
 if __name__ == '__main__':
-    # Check if we're on Render (has PORT environment variable)
     if os.environ.get('RENDER'):
         print("🚀 Starting bot on Render...")
-        # On Render, run the bot directly
         run_bot()
     else:
-        # Local development
         print("🔧 Starting bot locally...")
         run_bot()
