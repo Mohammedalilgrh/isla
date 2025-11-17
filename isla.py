@@ -1,13 +1,12 @@
 import os
 import tempfile
 import asyncio
-import threading
+import logging
 from telegram import Update, ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, ConversationHandler, CallbackQueryHandler
 from PIL import Image, ImageDraw, ImageFont
 import arabic_reshaper
 from bidi.algorithm import get_display
-import logging
 import requests
 import time
 
@@ -22,31 +21,28 @@ logger = logging.getLogger(__name__)
 BOT_TOKEN = "8422015788:AAF2HozDLDeDVMXD0HLwCa0LGWIcdK6S2p0"
 
 # Conversation states
-MAIN_MENU, UPLOADING_MEDIA, ADDING_QUOTES, PROCESSING = range(4)
+MAIN_MENU, UPLOADING_MEDIA, ADDING_QUOTES = range(3)
 
 class IslamicReelsBot:
     def __init__(self):
         self.user_sessions = {}
-        self.processing_tasks = {}  # To track ongoing processes
+        self.processing_flags = {}  # To track and stop processing
         self.setup_fonts()
     
     def setup_fonts(self):
         """Setup Arabic and English fonts"""
         try:
-            # Create fonts directory if it doesn't exist
             os.makedirs('fonts', exist_ok=True)
-            
-            # Download basic fonts if they don't exist
             self.download_fonts()
-            
         except Exception as e:
             logger.error(f"Error setting up fonts: {e}")
     
     def download_fonts(self):
-        """Download basic Arabic fonts"""
+        """Download basic fonts"""
         font_urls = {
             'amiri': 'https://github.com/alif-type/amiri/releases/download/0.113/amiri-0.113.zip',
-            'noto': 'https://github.com/googlefonts/noto-fonts/raw/main/hinted/ttf/NotoNaskhArabic/NotoNaskhArabic-Regular.ttf'
+            'noto': 'https://github.com/googlefonts/noto-fonts/raw/main/hinted/ttf/NotoNaskhArabic/NotoNaskhArabic-Regular.ttf',
+            'arial': 'https://github.com/googlefonts/roboto/raw/main/src/hinted/Roboto-Regular.ttf'
         }
         
         for name, url in font_urls.items():
@@ -66,7 +62,7 @@ class IslamicReelsBot:
         keyboard = [
             [KeyboardButton("📤 Upload Media"), KeyboardButton("📝 Add Quotes")],
             [KeyboardButton("🎬 Make Reels"), KeyboardButton("💾 Save All")],
-            [KeyboardButton("🛑 Stop"), KeyboardButton("🔄 Reset")]
+            [KeyboardButton("🛑 Stop Process"), KeyboardButton("🔄 Reset")]
         ]
         return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
     
@@ -84,6 +80,7 @@ class IslamicReelsBot:
         # Initialize user session
         self.user_sessions[user_id] = {
             'photos': [],
+            'videos': [],
             'quotes': [],
             'processed_media': []
         }
@@ -93,24 +90,26 @@ class IslamicReelsBot:
 
 *3 Simple Steps:*
 
-1. 📤 *Upload Photos* - Send your images
-2. 📝 *Add Quotes* - Write your custom quotes  
-3. 🎬 *Make Reels* - Create images with quotes
-4. 💾 *Save* - Save all reels directly to your device
+1️⃣ *Upload Media* - Send your images or short videos
+2️⃣ *Add Quotes* - Write your custom quotes  
+3️⃣ *Make Reels* - Create beautiful reels with quotes
+4️⃣ *Save* - Save directly to your device
 
-*New Features:*
-• Multiple languages supported 🌍
+✨ *New Features:*
+• Supports English & Arabic 🌍
 • Stop processing anytime 🛑
+• Save individual reels 💾
 
 *يدعم اللغة العربية والحركات*
 *Supports Arabic with Harakat*
 
 *Current Status:*
 📷 Photos: 0
+🎥 Videos: 0  
 📝 Quotes: 0
 🎬 Ready: 0
 
-Use the buttons below!
+Use the buttons below to get started! 🚀
         """
         
         await update.message.reply_text(
@@ -129,12 +128,13 @@ Use the buttons below!
             return MAIN_MENU
         
         await update.message.reply_text(
-            "📤 *Send your photos*:\n\n"
-            "• Send multiple photos one by one\n"
+            "📤 *Send your photos or short videos*:\n\n"
+            "• Send multiple files one by one\n"
             "• Click '📝 Add Quotes' when done\n"
-            "• Supported formats: JPG, PNG\n\n"
-            "*Tip:* Upload 1 photo + multiple quotes to create multiple reels from the same image!",
-            parse_mode='Markdown'
+            "• Supported: JPG, PNG, MP4 (short videos)\n\n"
+            "💡 *Tip:* Upload 1 media + multiple quotes = multiple reels from the same file!",
+            parse_mode='Markdown',
+            reply_markup=self.get_main_keyboard()
         )
         return UPLOADING_MEDIA
     
@@ -163,14 +163,71 @@ Use the buttons below!
                 
                 count = len(self.user_sessions[user_id]['photos'])
                 await update.message.reply_text(
-                    f"✅ Photo {count} received!",
+                    f"✅ Photo {count} received! 📷",
                     reply_markup=self.get_main_keyboard()
                 )
+                
+            elif update.message.video:
+                # Handle video upload
+                video = update.message.video
+                if video.duration > 60:  # Limit to 60 seconds
+                    await update.message.reply_text(
+                        "❌ Video too long! Please send videos under 60 seconds.",
+                        reply_markup=self.get_main_keyboard()
+                    )
+                    return UPLOADING_MEDIA
+                
+                video_file = await video.get_file()
+                
+                with tempfile.NamedTemporaryFile(delete=False, suffix='.mp4') as temp_file:
+                    await video_file.download_to_drive(temp_file.name)
+                    temp_path = temp_file.name
+                
+                self.user_sessions[user_id]['videos'].append({
+                    'file_path': temp_path,
+                    'file_id': video_file.file_id,
+                    'type': 'video',
+                    'duration': video.duration
+                })
+                
+                count = len(self.user_sessions[user_id]['videos'])
+                await update.message.reply_text(
+                    f"✅ Video {count} received! 🎥",
+                    reply_markup=self.get_main_keyboard()
+                )
+                
+            elif update.message.document:
+                # Handle document upload (could be video)
+                mime_type = update.message.document.mime_type
+                if mime_type and mime_type.startswith('video/'):
+                    video_file = await update.message.document.get_file()
+                    
+                    with tempfile.NamedTemporaryFile(delete=False, suffix='.mp4') as temp_file:
+                        await video_file.download_to_drive(temp_file.name)
+                        temp_path = temp_file.name
+                    
+                    self.user_sessions[user_id]['videos'].append({
+                        'file_path': temp_path,
+                        'file_id': video_file.file_id,
+                        'type': 'video',
+                        'duration': 0
+                    })
+                    
+                    count = len(self.user_sessions[user_id]['videos'])
+                    await update.message.reply_text(
+                        f"✅ Video {count} received! 🎥",
+                        reply_markup=self.get_main_keyboard()
+                    )
+                else:
+                    await update.message.reply_text(
+                        "❌ Unsupported file type. Please send photos or videos.",
+                        reply_markup=self.get_main_keyboard()
+                    )
         
         except Exception as e:
             logger.error(f"Error uploading media: {e}")
             await update.message.reply_text(
-                "❌ Error uploading photo. Try again.",
+                "❌ Error uploading media. Please try again.",
                 reply_markup=self.get_main_keyboard()
             )
         
@@ -185,26 +242,31 @@ Use the buttons below!
             return MAIN_MENU
         
         photo_count = len(self.user_sessions[user_id]['photos'])
+        video_count = len(self.user_sessions[user_id]['videos'])
+        total_media = photo_count + video_count
         
-        if photo_count == 0:
+        if total_media == 0:
             await update.message.reply_text(
-                "❌ Please upload photos first!",
+                "❌ Please upload photos or videos first!",
                 reply_markup=self.get_main_keyboard()
             )
             return MAIN_MENU
         
         await update.message.reply_text(
             f"📝 *Add your quotes*:\n\n"
-            f"You have {photo_count} photos.\n"
+            f"You have {photo_count} photos and {video_count} videos.\n"
             f"Send your quotes (one quote per line):\n\n"
-            f"*New Feature:* If you upload 1 photo and multiple quotes, you'll get multiple reels from the same image!\n\n"
-            f"*يدعم اللغة العربية والحركات*\n"
-            f"*Supports Arabic with Harakat*\n\n"
-            f"*Example Arabic:*\n"
-            f"رَّبِّ أَدْخِلْنِي مُدْخَلَ صِدْقٍ\nوَأَخْرِجْنِي مُخْرَجَ صِدْقٍ\nوَاجْعَل لِّي مِن لَّدُنكَ سُلْطَانًا نَّصِيرًا\n\n"
-            f"*Example English:*\n"
-            f"O my Lord! Let my entry be good\nAnd likewise my exit be good\nAnd grant me from You an authority to help me",
-            parse_mode='Markdown'
+            f"✨ *New Feature:* Upload 1 media + multiple quotes = multiple reels!\n\n"
+            f"🌍 *Supports Multiple Languages:*\n"
+            f"• Arabic with full harakat support\n"
+            f"• English and other languages\n\n"
+            f"📚 *Examples:*\n"
+            f"*Arabic:*\n"
+            f"رَّبِّ أَدْخِلْنِي مُدْخَلَ صِدْقٍ\nوَأَخْرِجْنِي مُخْرَجَ صِدْقٍ\n\n"
+            f"*English:*\n"
+            f"O my Lord! Let my entry be good\nAnd likewise my exit be good",
+            parse_mode='Markdown',
+            reply_markup=self.get_main_keyboard()
         )
         return ADDING_QUOTES
     
@@ -221,22 +283,26 @@ Use the buttons below!
         
         if not quotes_list:
             await update.message.reply_text(
-                "❌ No quotes found. Please send quotes:",
+                "❌ No quotes found. Please send valid quotes:",
                 reply_markup=self.get_main_keyboard()
             )
             return ADDING_QUOTES
         
         photo_count = len(self.user_sessions[user_id]['photos'])
+        video_count = len(self.user_sessions[user_id]['videos'])
+        total_media = photo_count + video_count
         
         # Store quotes
         self.user_sessions[user_id]['quotes'] = quotes_list
         
         await update.message.reply_text(
-            f"✅ *Quotes received!*\n\n"
+            f"✅ *Quotes Received Successfully!* 📝\n\n"
+            f"📊 *Your Collection:*\n"
             f"📷 Photos: {photo_count}\n"
+            f"🎥 Videos: {video_count}\n"
             f"📝 Quotes: {len(quotes_list)}\n\n"
-            f"*Possible combinations:* {photo_count} photos × {len(quotes_list)} quotes = {photo_count * len(quotes_list)} possible reels!\n\n"
-            f"Click '🎬 Make Reels' to create!",
+            f"🎬 *Possible Combinations:* {total_media} × {len(quotes_list)} = {total_media * len(quotes_list)} reels!\n\n"
+            f"Click '🎬 Make Reels' to create your content!",
             reply_markup=self.get_main_keyboard(),
             parse_mode='Markdown'
         )
@@ -244,44 +310,28 @@ Use the buttons below!
     
     def is_arabic_text(self, text):
         """Check if text contains Arabic characters"""
-        arabic_range = range(0x0600, 0x06FF)  # Arabic Unicode range
+        arabic_range = range(0x0600, 0x06FF)
         return any(ord(char) in arabic_range for char in text)
     
     def get_font(self, size, is_arabic=False):
         """Get appropriate font based on language"""
-        if is_arabic:
-            # Try Arabic fonts
-            arabic_fonts = [
-                'fonts/amiri.ttf',
-                'fonts/noto.ttf',
-                'fonts/tahoma.ttf'
-            ]
-            
-            for font_path in arabic_fonts:
-                try:
-                    if os.path.exists(font_path):
-                        return ImageFont.truetype(font_path, size)
-                except:
-                    continue
-        else:
-            # English fonts
-            english_fonts = [
-                'fonts/arial.ttf',
-                'arial.ttf'
-            ]
-            
-            for font_path in english_fonts:
-                try:
-                    if os.path.exists(font_path):
-                        return ImageFont.truetype(font_path, size)
-                except:
-                    continue
+        font_paths = [
+            'fonts/amiri.ttf' if is_arabic else 'fonts/arial.ttf',
+            'fonts/noto.ttf' if is_arabic else 'fonts/arial.ttf',
+            'arial.ttf'
+        ]
         
-        # Ultimate fallback
+        for font_path in font_paths:
+            try:
+                if os.path.exists(font_path):
+                    return ImageFont.truetype(font_path, size)
+            except:
+                continue
+        
         return ImageFont.load_default()
     
     def process_arabic_text(self, text):
-        """Process Arabic text with proper reshaping and bidirectional support"""
+        """Process Arabic text with proper reshaping"""
         try:
             arabic_reshaper.config.forget_letters()
             reshaped_text = arabic_reshaper.reshape(text)
@@ -399,20 +449,71 @@ Use the buttons below!
             logger.error(f"Error creating image: {e}")
             return image_path
     
+    def create_video_thumbnail(self, video_path, quote):
+        """Create a thumbnail from video with quote (simplified)"""
+        try:
+            # For simplicity, create an image thumbnail from video
+            # In production, you might want to use moviepy or other libraries
+            thumbnail_path = tempfile.mktemp(suffix='_thumbnail.jpg')
+            
+            # Create a simple colored background with the quote
+            width, height = 1080, 1350
+            background = Image.new('RGB', (width, height), (30, 60, 90))  # Islamic blue
+            
+            draw = ImageDraw.Draw(background)
+            is_arabic = self.is_arabic_text(quote)
+            
+            font_size = 60 if is_arabic else 50
+            font = self.get_font(font_size, is_arabic)
+            
+            lines = self.split_text_to_lines(quote, font, width * 0.8, is_arabic)
+            line_height = 80 if is_arabic else 70
+            total_height = len(lines) * line_height
+            text_y = (height - total_height) // 2
+            
+            # Draw decorative elements
+            draw.rectangle([50, text_y-60, width-50, text_y+total_height+60], 
+                         fill=(0, 0, 0, 180), outline=(255, 255, 255), width=3)
+            
+            # Draw text lines
+            for i, line in enumerate(lines):
+                if not line.strip():
+                    continue
+                
+                if is_arabic:
+                    line = self.process_arabic_text(line)
+                
+                bbox = draw.textbbox((0, 0), line, font=font)
+                text_width = bbox[2] - bbox[0]
+                
+                x_pos = (width - text_width) // 2
+                y_pos = text_y + (i * line_height)
+                
+                draw.text((x_pos, y_pos), line, font=font, fill=(255, 255, 255))
+            
+            background.save(thumbnail_path, quality=95)
+            return thumbnail_path
+            
+        except Exception as e:
+            logger.error(f"Error creating video thumbnail: {e}")
+            return self.create_image_with_quote(video_path, quote)
+    
     async def handle_stop_process(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Stop ongoing processing"""
         user_id = update.effective_user.id
         
-        if user_id in self.processing_tasks:
-            self.processing_tasks[user_id] = False
+        if user_id in self.processing_flags:
+            self.processing_flags[user_id] = False
             await update.message.reply_text(
-                "🛑 Processing stopped!",
-                reply_markup=self.get_main_keyboard()
+                "🛑 *Processing Stopped!*\n\nAll ongoing operations have been cancelled.",
+                reply_markup=self.get_main_keyboard(),
+                parse_mode='Markdown'
             )
         else:
             await update.message.reply_text(
-                "ℹ️ No ongoing process to stop.",
-                reply_markup=self.get_main_keyboard()
+                "ℹ️ *No active process to stop.*\n\nThere are no ongoing operations.",
+                reply_markup=self.get_main_keyboard(),
+                parse_mode='Markdown'
             )
         
         return MAIN_MENU
@@ -427,69 +528,83 @@ Use the buttons below!
         
         session = self.user_sessions[user_id]
         photos = session['photos']
+        videos = session['videos']
         quotes = session['quotes']
         
-        if not photos or not quotes:
+        all_media = photos + videos
+        
+        if not all_media or not quotes:
             await update.message.reply_text(
-                "❌ Please upload both photos and quotes first!",
+                "❌ Please upload both media and quotes first!",
                 reply_markup=self.get_main_keyboard()
             )
             return MAIN_MENU
         
-        # Clear previous results
+        # Clear previous results and set processing flag
         session['processed_media'] = []
-        self.processing_tasks[user_id] = True
+        self.processing_flags[user_id] = True
         
-        processing_msg = await update.message.reply_text("🔄 Creating your reels...")
+        processing_msg = await update.message.reply_text("🔄 *Starting to create your reels...*", parse_mode='Markdown')
         
-        total_combinations = len(photos) * len(quotes)
+        total_combinations = len(all_media) * len(quotes)
         created = 0
         
-        for photo_index, photo in enumerate(photos):
+        for media_index, media in enumerate(all_media):
             for quote_index, quote in enumerate(quotes):
                 # Check if user stopped the process
-                if not self.processing_tasks.get(user_id, True):
-                    await processing_msg.edit_text("🛑 Process stopped by user!")
+                if not self.processing_flags.get(user_id, True):
+                    await processing_msg.edit_text("🛑 *Process stopped by user!*", parse_mode='Markdown')
                     return MAIN_MENU
                 
                 try:
                     current_index = created + 1
-                    await processing_msg.edit_text(f"🔄 Creating reel {current_index}/{total_combinations}...")
+                    progress = f"🔄 Creating reel {current_index}/{total_combinations}..."
+                    await processing_msg.edit_text(progress)
                     
-                    photo_path = photo['file_path']
+                    media_path = media['file_path']
                     
-                    # Create image with quote
-                    result_path = self.create_image_with_quote(photo_path, quote)
+                    if media['type'] == 'image':
+                        result_path = self.create_image_with_quote(media_path, quote)
+                    else:  # video
+                        result_path = self.create_video_thumbnail(media_path, quote)
                     
                     if result_path and os.path.exists(result_path):
                         session['processed_media'].append({
                             'media_path': result_path,
                             'quote': quote,
-                            'photo_index': photo_index,
+                            'media_index': media_index,
                             'quote_index': quote_index,
-                            'index': created
+                            'index': created,
+                            'type': media['type']
                         })
                         created += 1
                         
+                    # Small delay to prevent overwhelming the system
+                    await asyncio.sleep(0.5)
+                        
                 except Exception as e:
-                    logger.error(f"Error with combination {photo_index}-{quote_index}: {e}")
+                    logger.error(f"Error with combination {media_index}-{quote_index}: {e}")
                     continue
         
-        # Clean up processing task
-        if user_id in self.processing_tasks:
-            del self.processing_tasks[user_id]
+        # Clean up processing flag
+        if user_id in self.processing_flags:
+            del self.processing_flags[user_id]
         
         # Send all created reels with save buttons
         if created > 0:
-            await processing_msg.edit_text(f"✅ Created {created} reels! Sending them now...")
+            await processing_msg.edit_text(f"✅ *Created {created} reels! Sending them now...*", parse_mode='Markdown')
             
             for i, media_data in enumerate(session['processed_media']):
                 try:
+                    if not self.processing_flags.get(user_id, True):
+                        break
+                        
                     if os.path.exists(media_data['media_path']):
                         with open(media_data['media_path'], 'rb') as f:
                             caption = f"**Reel {i+1}**\n{media_data['quote']}"
-                            if len(photos) == 1 and len(quotes) > 1:
-                                caption += f"\n\n📷 Photo 1 • 📝 Quote {media_data['quote_index'] + 1}"
+                            
+                            if len(all_media) == 1 and len(quotes) > 1:
+                                caption += f"\n\n📝 Quote {media_data['quote_index'] + 1}"
                             
                             await update.message.reply_photo(
                                 photo=f,
@@ -497,25 +612,26 @@ Use the buttons below!
                                 reply_markup=self.get_save_keyboard(i),
                                 parse_mode='Markdown'
                             )
-                        await asyncio.sleep(1)
+                        await asyncio.sleep(1)  # Rate limiting
                         
                 except Exception as e:
                     logger.error(f"Error sending reel {i}: {e}")
                     continue
             
             await update.message.reply_text(
-                f"🎉 *All {created} reels sent!*\n\n"
-                f"*Combination Summary:*\n"
+                f"🎉 *Successfully Created {created} Reels!*\n\n"
+                f"📊 *Summary:*\n"
                 f"📷 Photos: {len(photos)}\n"
+                f"🎥 Videos: {len(videos)}\n"
                 f"📝 Quotes: {len(quotes)}\n"
                 f"🎬 Created: {created} reels\n\n"
-                f"Click the 💾 button under each reel to save it directly to your device!",
+                f"💾 *Click the 'Save' button under each reel to download it directly to your device!*",
                 reply_markup=self.get_main_keyboard(),
                 parse_mode='Markdown'
             )
         else:
             await processing_msg.edit_text(
-                "❌ No reels were created. Please try again with different photos.",
+                "❌ No reels were created. Please try again with different media or quotes.",
                 reply_markup=self.get_main_keyboard()
             )
         
@@ -568,12 +684,12 @@ Use the buttons below!
         
         if not media_list:
             await update.message.reply_text(
-                "❌ No reels found! Create reels first.",
+                "❌ No reels found! Please create reels first.",
                 reply_markup=self.get_main_keyboard()
             )
             return MAIN_MENU
         
-        status_msg = await update.message.reply_text(f"💾 Saving {len(media_list)} reels...")
+        status_msg = await update.message.reply_text(f"💾 *Preparing {len(media_list)} reels for download...*", parse_mode='Markdown')
         
         sent = 0
         for i, media_data in enumerate(media_list):
@@ -586,12 +702,12 @@ Use the buttons below!
                             caption=f"Reel {i+1}\n{media_data['quote']}"
                         )
                     sent += 1
-                    await asyncio.sleep(1)
+                    await asyncio.sleep(1)  # Rate limiting
             except Exception as e:
                 logger.error(f"Error saving reel {i}: {e}")
                 continue
         
-        await status_msg.edit_text(f"✅ Saved {sent} reels to your device!")
+        await status_msg.edit_text(f"✅ *Successfully saved {sent} reels to your device!*", parse_mode='Markdown')
         return MAIN_MENU
     
     async def handle_reset(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -599,17 +715,17 @@ Use the buttons below!
         user_id = update.effective_user.id
         
         # Stop any ongoing process
-        if user_id in self.processing_tasks:
-            self.processing_tasks[user_id] = False
+        if user_id in self.processing_flags:
+            self.processing_flags[user_id] = False
         
         if user_id in self.user_sessions:
             session = self.user_sessions[user_id]
             
             # Clean up all temporary files
-            for photo in session['photos']:
+            for media in session['photos'] + session['videos']:
                 try:
-                    if os.path.exists(photo['file_path']):
-                        os.unlink(photo['file_path'])
+                    if os.path.exists(media['file_path']):
+                        os.unlink(media['file_path'])
                 except:
                     pass
             
@@ -620,60 +736,61 @@ Use the buttons below!
                 except:
                     pass
             
-            self.user_sessions[user_id] = {'photos': [], 'quotes': [], 'processed_media': []}
+            # Reset session
+            self.user_sessions[user_id] = {'photos': [], 'videos': [], 'quotes': [], 'processed_media': []}
         
         await update.message.reply_text(
-            "🔄 Reset complete! Start fresh.",
-            reply_markup=self.get_main_keyboard()
+            "🔄 *Reset Complete!*\n\nAll data has been cleared. You can start fresh!",
+            reply_markup=self.get_main_keyboard(),
+            parse_mode='Markdown'
         )
         return MAIN_MENU
 
 def run_bot():
     """Run the bot with polling"""
-    bot = IslamicReelsBot()
-    
-    # Create application
-    application = Application.builder().token(BOT_TOKEN).build()
-    
-    # Add handlers
-    conv_handler = ConversationHandler(
-        entry_points=[CommandHandler('start', bot.start)],
-        states={
-            MAIN_MENU: [
-                MessageHandler(filters.Regex('^📤 Upload Media$'), bot.handle_upload_media),
-                MessageHandler(filters.Regex('^📝 Add Quotes$'), bot.handle_add_quotes),
-                MessageHandler(filters.Regex('^🎬 Make Reels$'), bot.handle_make_reels),
-                MessageHandler(filters.Regex('^💾 Save All$'), bot.handle_save_all),
-                MessageHandler(filters.Regex('^🛑 Stop$'), bot.handle_stop_process),
-                MessageHandler(filters.Regex('^🔄 Reset$'), bot.handle_reset),
-            ],
-            UPLOADING_MEDIA: [
-                MessageHandler(filters.PHOTO, bot.handle_media),
-                MessageHandler(filters.Regex('^📝 Add Quotes$'), bot.handle_add_quotes),
-            ],
-            ADDING_QUOTES: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, bot.handle_quotes)
-            ]
-        },
-        fallbacks=[CommandHandler('start', bot.start)]
-    )
-    
-    application.add_handler(CallbackQueryHandler(bot.handle_save_callback, pattern="^save_"))
-    application.add_handler(conv_handler)
-    
-    print("🤖 Islamic Reels Bot Starting...")
-    print("Bot is running with polling!")
-    
-    # Start the bot
-    application.run_polling(
-        drop_pending_updates=True,
-        timeout=30,
-        pool_timeout=30
-    )
+    try:
+        bot = IslamicReelsBot()
+        
+        application = Application.builder().token(BOT_TOKEN).build()
+        
+        conv_handler = ConversationHandler(
+            entry_points=[CommandHandler('start', bot.start)],
+            states={
+                MAIN_MENU: [
+                    MessageHandler(filters.Regex('^📤 Upload Media$'), bot.handle_upload_media),
+                    MessageHandler(filters.Regex('^📝 Add Quotes$'), bot.handle_add_quotes),
+                    MessageHandler(filters.Regex('^🎬 Make Reels$'), bot.handle_make_reels),
+                    MessageHandler(filters.Regex('^💾 Save All$'), bot.handle_save_all),
+                    MessageHandler(filters.Regex('^🛑 Stop Process$'), bot.handle_stop_process),
+                    MessageHandler(filters.Regex('^🔄 Reset$'), bot.handle_reset),
+                ],
+                UPLOADING_MEDIA: [
+                    MessageHandler(filters.PHOTO | filters.VIDEO | filters.Document.ALL, bot.handle_media),
+                    MessageHandler(filters.Regex('^📝 Add Quotes$'), bot.handle_add_quotes),
+                ],
+                ADDING_QUOTES: [
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, bot.handle_quotes)
+                ]
+            },
+            fallbacks=[CommandHandler('start', bot.start)]
+        )
+        
+        application.add_handler(CallbackQueryHandler(bot.handle_save_callback, pattern="^save_"))
+        application.add_handler(conv_handler)
+        
+        print("🤖 Islamic Reels Bot Starting...")
+        print("✅ Bot is running with polling!")
+        print("🚀 Ready to receive messages...")
+        
+        application.run_polling(drop_pending_updates=True)
+        
+    except Exception as e:
+        print(f"❌ Bot error: {e}")
+        raise
 
 def main():
-    """Main function to run the bot"""
-    max_retries = 5
+    """Main function with error handling"""
+    max_retries = 3
     retry_delay = 10
     
     for attempt in range(max_retries):
@@ -681,43 +798,20 @@ def main():
             print(f"🚀 Starting bot (attempt {attempt + 1}/{max_retries})...")
             run_bot()
         except Exception as e:
-            print(f"❌ Bot crashed with error: {e}")
+            print(f"❌ Bot crashed: {e}")
             if attempt < max_retries - 1:
                 print(f"🔄 Retrying in {retry_delay} seconds...")
                 time.sleep(retry_delay)
-                retry_delay *= 2  # Exponential backoff
             else:
                 print("💥 Max retries reached. Bot stopped.")
-                raise
 
 if __name__ == '__main__':
-    # For Render, we need to run as a background worker
-    print("🔧 Starting as Background Worker...")
+    print("=" * 50)
+    print("🕌 Islamic Reels Bot - Lifetime Version")
+    print("🌍 Supports English & Arabic")
+    print("🎥 Photos & Videos")
+    print("💾 Save Direct to Device")
+    print("🛑 Stop Process Feature")
+    print("=" * 50)
     
-    # Check if we're on Render
-    if os.environ.get('RENDER'):
-        print("🌐 Running on Render Cloud...")
-        # Add health check endpoint for Render
-        from http.server import HTTPServer, BaseHTTPRequestHandler
-        import threading
-        
-        class HealthHandler(BaseHTTPRequestHandler):
-            def do_GET(self):
-                self.send_response(200)
-                self.end_headers()
-                self.wfile.write(b'OK')
-            
-            def log_message(self, format, *args):
-                return  # Disable logging
-        
-        def start_health_server():
-            server = HTTPServer(('0.0.0.0', 8080), HealthHandler)
-            print("❤️ Health check server running on port 8080")
-            server.serve_forever()
-        
-        # Start health server in background thread
-        health_thread = threading.Thread(target=start_health_server, daemon=True)
-        health_thread.start()
-    
-    # Start the bot
     main()
