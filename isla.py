@@ -726,114 +726,49 @@ Use the buttons below to get started! 🚀
         )
         return MAIN_MENU
 
-class BotRunner:
-    def __init__(self):
-        self.bot = IslamicReelsBot()
-        self.application = None
-        self.is_running = False
+def setup_bot():
+    """Setup and return the bot application"""
+    bot = IslamicReelsBot()
     
-    def setup_application(self):
-        """Setup the telegram application"""
-        try:
-            self.application = Application.builder().token(BOT_TOKEN).build()
-            
-            conv_handler = ConversationHandler(
-                entry_points=[CommandHandler('start', self.bot.start)],
-                states={
-                    MAIN_MENU: [
-                        MessageHandler(filters.Regex('^📤 Upload Media$'), self.bot.handle_upload_media),
-                        MessageHandler(filters.Regex('^📝 Add Quotes$'), self.bot.handle_add_quotes),
-                        MessageHandler(filters.Regex('^🎬 Make Reels$'), self.bot.handle_make_reels),
-                        MessageHandler(filters.Regex('^💾 Save All$'), self.bot.handle_save_all),
-                        MessageHandler(filters.Regex('^🛑 Stop Process$'), self.bot.handle_stop_process),
-                        MessageHandler(filters.Regex('^🔄 Reset$'), self.bot.handle_reset),
-                    ],
-                    UPLOADING_MEDIA: [
-                        MessageHandler(filters.PHOTO | filters.VIDEO | filters.Document.ALL, self.bot.handle_media),
-                        MessageHandler(filters.Regex('^📝 Add Quotes$'), self.bot.handle_add_quotes),
-                    ],
-                    ADDING_QUOTES: [
-                        MessageHandler(filters.TEXT & ~filters.COMMAND, self.bot.handle_quotes)
-                    ]
-                },
-                fallbacks=[CommandHandler('start', self.bot.start)]
-            )
-            
-            self.application.add_handler(CallbackQueryHandler(self.bot.handle_save_callback, pattern="^save_"))
-            self.application.add_handler(conv_handler)
-            
-            return True
-        except Exception as e:
-            logger.error(f"Error setting up application: {e}")
-            return False
+    application = Application.builder().token(BOT_TOKEN).build()
     
-    async def run_bot(self):
-        """Run the bot with proper error handling"""
-        try:
-            if not self.application:
-                if not self.setup_application():
-                    return False
-            
-            print("🤖 Islamic Reels Bot Starting...")
-            print("✅ Bot is running with polling!")
-            print("🚀 Ready to receive messages...")
-            print("💫 Bot will run forever...")
-            
-            await self.application.initialize()
-            await self.application.start()
-            await self.application.updater.start_polling(
-                drop_pending_updates=True,
-                timeout=30,
-                pool_timeout=30
-            )
-            
-            self.is_running = True
-            print("🎉 Bot is now fully operational!")
-            
-            # Keep the bot running forever
-            while self.is_running:
-                await asyncio.sleep(1)
-                
-            return True
-            
-        except asyncio.CancelledError:
-            print("🛑 Bot stopped by user")
-            return False
-        except Exception as e:
-            logger.error(f"Bot error: {e}")
-            return False
-        finally:
-            await self.shutdown()
+    conv_handler = ConversationHandler(
+        entry_points=[CommandHandler('start', bot.start)],
+        states={
+            MAIN_MENU: [
+                MessageHandler(filters.Regex('^📤 Upload Media$'), bot.handle_upload_media),
+                MessageHandler(filters.Regex('^📝 Add Quotes$'), bot.handle_add_quotes),
+                MessageHandler(filters.Regex('^🎬 Make Reels$'), bot.handle_make_reels),
+                MessageHandler(filters.Regex('^💾 Save All$'), bot.handle_save_all),
+                MessageHandler(filters.Regex('^🛑 Stop Process$'), bot.handle_stop_process),
+                MessageHandler(filters.Regex('^🔄 Reset$'), bot.handle_reset),
+            ],
+            UPLOADING_MEDIA: [
+                MessageHandler(filters.PHOTO | filters.VIDEO | filters.Document.ALL, bot.handle_media),
+                MessageHandler(filters.Regex('^📝 Add Quotes$'), bot.handle_add_quotes),
+            ],
+            ADDING_QUOTES: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, bot.handle_quotes)
+            ]
+        },
+        fallbacks=[CommandHandler('start', bot.start)]
+    )
     
-    async def shutdown(self):
-        """Properly shutdown the bot"""
-        try:
-            if self.application:
-                if self.application.updater:
-                    await self.application.updater.stop()
-                await self.application.stop()
-                await self.application.shutdown()
-            self.is_running = False
-            print("🔴 Bot shutdown complete")
-        except Exception as e:
-            logger.error(f"Error during shutdown: {e}")
+    application.add_handler(CallbackQueryHandler(bot.handle_save_callback, pattern="^save_"))
+    application.add_handler(conv_handler)
+    
+    return application
 
-def signal_handler(signum, frame):
-    """Handle shutdown signals"""
-    print(f"\n🛑 Received signal {signum}, shutting down gracefully...")
-    sys.exit(0)
-
-async def main():
-    """Main function that runs forever"""
-    # Setup signal handlers for graceful shutdown
-    signal.signal(signal.SIGINT, signal_handler)
-    signal.signal(signal.SIGTERM, signal_handler)
+async def run_bot_forever():
+    """Run the bot forever with proper error handling"""
+    restart_count = 0
+    max_restarts = 1000  # Very high limit for "forever"
     
-    runner = BotRunner()
-    
-    while True:
+    while restart_count < max_restarts:
         try:
+            restart_count += 1
             print("=" * 60)
+            print(f"🔄 Starting Islamic Reels Bot (Attempt {restart_count})")
             print("🕌 Islamic Reels Bot - LIFETIME VERSION")
             print("🌍 Supports English & Arabic")
             print("🎥 Photos & Videos Support")
@@ -842,22 +777,79 @@ async def main():
             print("⏰ Running 24/7 Forever...")
             print("=" * 60)
             
-            success = await runner.run_bot()
+            # Setup bot
+            application = setup_bot()
             
-            if not success:
-                print("🔄 Restarting bot in 5 seconds...")
-                await asyncio.sleep(5)
-            else:
-                break
+            # Start the bot
+            print("🤖 Bot is starting...")
+            await application.initialize()
+            await application.start()
+            await application.updater.start_polling(
+                drop_pending_updates=True,
+                timeout=30,
+                pool_timeout=30,
+                allowed_updates=Update.ALL_TYPES
+            )
+            
+            print("✅ Bot is now running and ready to receive messages!")
+            print("💫 Bot will run continuously...")
+            
+            # Keep the bot running
+            while True:
+                await asyncio.sleep(3600)  # Sleep for 1 hour, then continue
                 
+        except asyncio.CancelledError:
+            print("\n🛑 Bot stopped by user request")
+            break
         except KeyboardInterrupt:
-            print("\n🛑 Bot stopped by user")
+            print("\n🛑 Bot stopped by keyboard interrupt")
             break
         except Exception as e:
-            print(f"💥 Unexpected error: {e}")
-            print("🔄 Restarting bot in 10 seconds...")
-            await asyncio.sleep(10)
+            print(f"💥 Bot crashed with error: {e}")
+            print("🔄 Restarting bot in 5 seconds...")
+            
+            # Try to shutdown properly
+            try:
+                if 'application' in locals():
+                    await application.updater.stop()
+                    await application.stop()
+                    await application.shutdown()
+            except Exception as shutdown_error:
+                print(f"⚠️ Error during shutdown: {shutdown_error}")
+            
+            await asyncio.sleep(5)
+    
+    print("🔴 Bot has stopped permanently")
+
+def signal_handler(signum, frame):
+    """Handle shutdown signals gracefully"""
+    print(f"\n🛑 Received signal {signum}, initiating graceful shutdown...")
+    # Set the event to stop the bot
+    sys.exit(0)
+
+async def main():
+    """Main entry point"""
+    # Setup signal handlers
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
+    
+    try:
+        await run_bot_forever()
+    except Exception as e:
+        print(f"💥 Fatal error in main: {e}")
+    finally:
+        print("🎯 Islamic Reels Bot has stopped. Thank you for using!")
 
 if __name__ == '__main__':
-    # Run the bot forever
+    # Simple and reliable startup
+    print("🚀 Launching Islamic Reels Bot...")
+    
+    # Check token
+    if BOT_TOKEN:
+        print("✅ Bot token is configured")
+    else:
+        print("❌ Bot token is missing!")
+        sys.exit(1)
+    
+    # Run the bot
     asyncio.run(main())
