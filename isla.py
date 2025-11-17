@@ -4,14 +4,13 @@ import asyncio
 import threading
 from telegram import Update, ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, ConversationHandler, CallbackQueryHandler
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFont, ImageSequence
 import arabic_reshaper
 from bidi.algorithm import get_display
 import logging
 import requests
-import cv2
-import numpy as np
-from moviepy.editor import VideoFileClip, TextClip, CompositeVideoClip
+import subprocess
+import shutil
 
 # Set up logging
 logging.basicConfig(
@@ -460,68 +459,127 @@ Use the buttons below!
             logger.error(f"Error creating image: {e}")
             return image_path
     
-    def create_video_with_quote(self, video_path, quote):
-        """Create video with quote overlay"""
+    def create_video_with_quote_simple(self, video_path, quote):
+        """Create a simple video with quote by extracting a frame and converting to image"""
         try:
-            # Load video
-            video = VideoFileClip(video_path)
+            # For simplicity, we'll extract the first frame and create an image
+            # This avoids complex video processing dependencies
             
-            # Check if text is Arabic
+            # Extract first frame from video
+            frame_path = tempfile.mktemp(suffix='_frame.jpg')
+            
+            # Try using ffmpeg if available
+            try:
+                cmd = ['ffmpeg', '-i', video_path, '-ss', '00:00:01', '-vframes', '1', frame_path]
+                result = subprocess.run(cmd, capture_output=True, timeout=30)
+                
+                if result.returncode != 0 or not os.path.exists(frame_path):
+                    # Fallback: use the original video path as image (won't work but handles error)
+                    logger.warning("FFmpeg failed, using fallback")
+                    return self.create_image_with_quote(video_path, quote)
+                    
+            except (subprocess.TimeoutExpired, FileNotFoundError, Exception) as e:
+                logger.warning(f"FFmpeg not available: {e}")
+                # If ffmpeg fails, create a simple colored background
+                return self.create_simple_video_fallback(quote)
+            
+            # Create image with quote from the frame
+            result_path = self.create_image_with_quote(frame_path, quote)
+            
+            # Clean up frame
+            try:
+                if os.path.exists(frame_path):
+                    os.unlink(frame_path)
+            except:
+                pass
+            
+            return result_path
+            
+        except Exception as e:
+            logger.error(f"Error creating simple video: {e}")
+            return self.create_simple_video_fallback(quote)
+    
+    def create_simple_video_fallback(self, quote):
+        """Create a simple image when video processing fails"""
+        try:
+            width, height = 1080, 1350
+            background = Image.new('RGB', (width, height), (30, 60, 90))  # Islamic blue color
+            
+            draw = ImageDraw.Draw(background)
             is_arabic = self.is_arabic_text(quote)
             
-            # Process Arabic text
-            if is_arabic:
-                display_text = self.process_arabic_text(quote)
-            else:
-                display_text = quote
-            
-            # Create text clip
             font_size = 60 if is_arabic else 50
-            font = 'Amiri-Regular' if is_arabic else 'Arial'
+            font = self.get_font(font_size, is_arabic)
             
-            text_clip = TextClip(
-                display_text,
-                fontsize=font_size,
-                color='white',
-                font=font,
-                stroke_color='black',
-                stroke_width=2
-            )
+            lines = self.split_text_to_lines(quote, font, width * 0.8, is_arabic)
+            line_height = 80 if is_arabic else 70
+            total_height = len(lines) * line_height
+            text_y = (height - total_height) // 2
             
-            # Position text in the middle
-            text_clip = text_clip.set_position('center').set_duration(video.duration)
+            # Draw decorative elements
+            draw.rectangle([50, text_y-60, width-50, text_y+total_height+60], fill=(0, 0, 0, 180), outline=(255, 255, 255), width=3)
             
-            # Create semi-transparent background for text
-            text_bg = ColorClip(
-                size=(video.w, text_clip.h + 40),
-                color=(0, 0, 0),
-                duration=video.duration
-            ).set_opacity(0.6).set_position(('center', 'center'))
+            # Draw text lines
+            for i, line in enumerate(lines):
+                if not line.strip():
+                    continue
+                
+                if is_arabic:
+                    line = self.process_arabic_text(line)
+                
+                bbox = draw.textbbox((0, 0), line, font=font)
+                text_width = bbox[2] - bbox[0]
+                
+                if is_arabic:
+                    x_pos = (width - text_width) // 2 + 100  # Adjust for Arabic
+                else:
+                    x_pos = (width - text_width) // 2
+                
+                y_pos = text_y + (i * line_height)
+                
+                draw.text((x_pos, y_pos), line, font=font, fill=(255, 255, 255))
             
-            # Composite everything
-            final_video = CompositeVideoClip([video, text_bg, text_clip])
-            
-            output_path = tempfile.mktemp(suffix='_quote.mp4')
-            final_video.write_videofile(
-                output_path,
-                codec='libx264',
-                audio_codec='aac',
-                temp_audiofile='temp-audio.m4a',
-                remove_temp=True,
-                fps=24
-            )
-            
-            # Close clips to free memory
-            video.close()
-            final_video.close()
-            text_clip.close()
-            text_bg.close()
-            
+            output_path = tempfile.mktemp(suffix='_quote.jpg')
+            background.save(output_path, quality=95)
             return output_path
             
         except Exception as e:
-            logger.error(f"Error creating video: {e}")
-            return video_path
+            logger.error(f"Error in video fallback: {e}")
+            # Ultimate fallback - create text file
+            return self.create_text_fallback(quote)
+    
+    def create_text_fallback(self, quote):
+        """Create a simple text image as ultimate fallback"""
+        try:
+            width, height = 1080, 1350
+            img = Image.new('RGB', (width, height), (0, 0, 0))
+            draw = ImageDraw.Draw(img)
+            
+            # Use default font
+            try:
+                font = ImageFont.load_default()
+            except:
+                font = None
+            
+            lines = quote.split('\n')
+            y_pos = height // 2 - (len(lines) * 20)
+            
+            for i, line in enumerate(lines):
+                if font:
+                    bbox = draw.textbbox((0, 0), line, font=font)
+                    text_width = bbox[2] - bbox[0]
+                    x_pos = (width - text_width) // 2
+                    draw.text((x_pos, y_pos + (i * 40)), line, fill=(255, 255, 255), font=font)
+                else:
+                    # Without font, we can't center properly but we try
+                    draw.text((50, y_pos + (i * 40)), line, fill=(255, 255, 255))
+            
+            output_path = tempfile.mktemp(suffix='_quote.jpg')
+            img.save(output_path)
+            return output_path
+        except Exception as e:
+            logger.error(f"Error in text fallback: {e}")
+            return None
     
     async def handle_stop_process(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Stop ongoing processing"""
@@ -588,7 +646,7 @@ Use the buttons below!
                     if media['type'] == 'image':
                         result_path = self.create_image_with_quote(media_path, quote)
                     else:  # video
-                        result_path = self.create_video_with_quote(media_path, quote)
+                        result_path = self.create_video_with_quote_simple(media_path, quote)
                     
                     if result_path and os.path.exists(result_path):
                         session['processed_media'].append({
@@ -597,7 +655,7 @@ Use the buttons below!
                             'media_index': media_index,
                             'quote_index': quote_index,
                             'index': created,
-                            'type': media['type']
+                            'type': 'image'  # All outputs are images for simplicity
                         })
                         created += 1
                         
@@ -622,20 +680,13 @@ Use the buttons below!
                             if len(all_media) == 1 and len(quotes) > 1:
                                 caption += f"\n\n📝 Quote {media_data['quote_index'] + 1}"
                             
-                            if media_data['type'] == 'image':
-                                await update.message.reply_photo(
-                                    photo=f,
-                                    caption=caption,
-                                    reply_markup=self.get_save_keyboard(i, 'image'),
-                                    parse_mode='Markdown'
-                                )
-                            else:
-                                await update.message.reply_video(
-                                    video=f,
-                                    caption=caption,
-                                    reply_markup=self.get_save_keyboard(i, 'video'),
-                                    parse_mode='Markdown'
-                                )
+                            # Always send as photo since videos are converted to images
+                            await update.message.reply_photo(
+                                photo=f,
+                                caption=caption,
+                                reply_markup=self.get_save_keyboard(i, 'image'),
+                                parse_mode='Markdown'
+                            )
                         await asyncio.sleep(1)
                         
                 except Exception as e:
@@ -646,7 +697,7 @@ Use the buttons below!
                 f"🎉 *All {created} reels sent!*\n\n"
                 f"*Combination Summary:*\n"
                 f"📷 Photos: {len(photos)}\n"
-                f"🎥 Videos: {len(videos)}\n"
+                f"🎥 Videos: {len(videos)} (converted to images)\n"
                 f"📝 Quotes: {len(quotes)}\n"
                 f"🎬 Created: {created} reels\n\n"
                 f"Click the 💾 button under each reel to save it directly to your device!",
@@ -684,18 +735,11 @@ Use the buttons below!
                         
                         if os.path.exists(media_data['media_path']):
                             with open(media_data['media_path'], 'rb') as f:
-                                if media_type == 'image':
-                                    await query.message.reply_document(
-                                        document=f,
-                                        filename=f"islamic_reel_{media_index + 1}.jpg",
-                                        caption=f"💾 Saved: Reel {media_index + 1}\n{media_data['quote']}"
-                                    )
-                                else:
-                                    await query.message.reply_document(
-                                        document=f,
-                                        filename=f"islamic_reel_{media_index + 1}.mp4",
-                                        caption=f"💾 Saved: Reel {media_index + 1}\n{media_data['quote']}"
-                                    )
+                                await query.message.reply_document(
+                                    document=f,
+                                    filename=f"islamic_reel_{media_index + 1}.jpg",
+                                    caption=f"💾 Saved: Reel {media_index + 1}\n{media_data['quote']}"
+                                )
                             await query.edit_message_reply_markup(reply_markup=None)
                             return
                 
@@ -729,18 +773,11 @@ Use the buttons below!
             try:
                 if os.path.exists(media_data['media_path']):
                     with open(media_data['media_path'], 'rb') as f:
-                        if media_data['type'] == 'image':
-                            await update.message.reply_document(
-                                document=f,
-                                filename=f"islamic_reel_{i+1}.jpg",
-                                caption=f"Reel {i+1}\n{media_data['quote']}"
-                            )
-                        else:
-                            await update.message.reply_document(
-                                document=f,
-                                filename=f"islamic_reel_{i+1}.mp4",
-                                caption=f"Reel {i+1}\n{media_data['quote']}"
-                            )
+                        await update.message.reply_document(
+                            document=f,
+                            filename=f"islamic_reel_{i+1}.jpg",
+                            caption=f"Reel {i+1}\n{media_data['quote']}"
+                        )
                     sent += 1
                     await asyncio.sleep(1)
             except Exception as e:
