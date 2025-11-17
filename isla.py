@@ -2,13 +2,14 @@ import os
 import tempfile
 import asyncio
 import logging
+import signal
+import sys
 from telegram import Update, ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, ConversationHandler, CallbackQueryHandler
 from PIL import Image, ImageDraw, ImageFont
 import arabic_reshaper
 from bidi.algorithm import get_display
 import requests
-import time
 
 # Set up logging
 logging.basicConfig(
@@ -26,7 +27,7 @@ MAIN_MENU, UPLOADING_MEDIA, ADDING_QUOTES = range(3)
 class IslamicReelsBot:
     def __init__(self):
         self.user_sessions = {}
-        self.processing_flags = {}  # To track and stop processing
+        self.processing_flags = {}
         self.setup_fonts()
     
     def setup_fonts(self):
@@ -42,7 +43,6 @@ class IslamicReelsBot:
         font_urls = {
             'amiri': 'https://github.com/alif-type/amiri/releases/download/0.113/amiri-0.113.zip',
             'noto': 'https://github.com/googlefonts/noto-fonts/raw/main/hinted/ttf/NotoNaskhArabic/NotoNaskhArabic-Regular.ttf',
-            'arial': 'https://github.com/googlefonts/roboto/raw/main/src/hinted/Roboto-Regular.ttf'
         }
         
         for name, url in font_urls.items():
@@ -170,7 +170,7 @@ Use the buttons below to get started! 🚀
             elif update.message.video:
                 # Handle video upload
                 video = update.message.video
-                if video.duration > 60:  # Limit to 60 seconds
+                if video.duration > 60:
                     await update.message.reply_text(
                         "❌ Video too long! Please send videos under 60 seconds.",
                         reply_markup=self.get_main_keyboard()
@@ -197,7 +197,6 @@ Use the buttons below to get started! 🚀
                 )
                 
             elif update.message.document:
-                # Handle document upload (could be video)
                 mime_type = update.message.document.mime_type
                 if mime_type and mime_type.startswith('video/'):
                     video_file = await update.message.document.get_file()
@@ -292,7 +291,6 @@ Use the buttons below to get started! 🚀
         video_count = len(self.user_sessions[user_id]['videos'])
         total_media = photo_count + video_count
         
-        # Store quotes
         self.user_sessions[user_id]['quotes'] = quotes_list
         
         await update.message.reply_text(
@@ -316,8 +314,8 @@ Use the buttons below to get started! 🚀
     def get_font(self, size, is_arabic=False):
         """Get appropriate font based on language"""
         font_paths = [
-            'fonts/amiri.ttf' if is_arabic else 'fonts/arial.ttf',
-            'fonts/noto.ttf' if is_arabic else 'fonts/arial.ttf',
+            'fonts/amiri.ttf' if is_arabic else 'arial.ttf',
+            'fonts/noto.ttf' if is_arabic else 'arial.ttf',
             'arial.ttf'
         ]
         
@@ -345,13 +343,11 @@ Use the buttons below to get started! 🚀
         """Split text into lines that fit within max_width"""
         lines = []
         
-        # Process Arabic text
         if is_arabic:
             processed_text = self.process_arabic_text(text)
         else:
             processed_text = text
         
-        # Split by user's line breaks first
         user_lines = processed_text.split('\n')
         
         for user_line in user_lines:
@@ -408,7 +404,6 @@ Use the buttons below to get started! 🚀
             total_height = len(lines) * line_height
             text_y = (height - total_height) // 2
             
-            # Draw semi-transparent background
             padding = 40
             bg_height = total_height + (padding * 2)
             bg_width = width - 100
@@ -418,7 +413,6 @@ Use the buttons below to get started! 🚀
             overlay = Image.new('RGBA', (bg_width, bg_height), (0, 0, 0, 180))
             background.paste(overlay, (bg_x, bg_y), overlay)
             
-            # Draw text lines
             for i, line in enumerate(lines):
                 if not line.strip():
                     continue
@@ -436,7 +430,6 @@ Use the buttons below to get started! 🚀
                 
                 y_pos = text_y + (i * line_height)
                 
-                # Draw text shadow
                 shadow_offset = 3
                 draw.text((x_pos + shadow_offset, y_pos + shadow_offset), line, font=font, fill=(0, 0, 0, 200))
                 draw.text((x_pos, y_pos), line, font=font, fill=(255, 255, 255))
@@ -450,15 +443,12 @@ Use the buttons below to get started! 🚀
             return image_path
     
     def create_video_thumbnail(self, video_path, quote):
-        """Create a thumbnail from video with quote (simplified)"""
+        """Create a thumbnail from video with quote"""
         try:
-            # For simplicity, create an image thumbnail from video
-            # In production, you might want to use moviepy or other libraries
             thumbnail_path = tempfile.mktemp(suffix='_thumbnail.jpg')
             
-            # Create a simple colored background with the quote
             width, height = 1080, 1350
-            background = Image.new('RGB', (width, height), (30, 60, 90))  # Islamic blue
+            background = Image.new('RGB', (width, height), (30, 60, 90))
             
             draw = ImageDraw.Draw(background)
             is_arabic = self.is_arabic_text(quote)
@@ -471,11 +461,9 @@ Use the buttons below to get started! 🚀
             total_height = len(lines) * line_height
             text_y = (height - total_height) // 2
             
-            # Draw decorative elements
             draw.rectangle([50, text_y-60, width-50, text_y+total_height+60], 
                          fill=(0, 0, 0, 180), outline=(255, 255, 255), width=3)
             
-            # Draw text lines
             for i, line in enumerate(lines):
                 if not line.strip():
                     continue
@@ -540,7 +528,6 @@ Use the buttons below to get started! 🚀
             )
             return MAIN_MENU
         
-        # Clear previous results and set processing flag
         session['processed_media'] = []
         self.processing_flags[user_id] = True
         
@@ -551,7 +538,6 @@ Use the buttons below to get started! 🚀
         
         for media_index, media in enumerate(all_media):
             for quote_index, quote in enumerate(quotes):
-                # Check if user stopped the process
                 if not self.processing_flags.get(user_id, True):
                     await processing_msg.edit_text("🛑 *Process stopped by user!*", parse_mode='Markdown')
                     return MAIN_MENU
@@ -565,7 +551,7 @@ Use the buttons below to get started! 🚀
                     
                     if media['type'] == 'image':
                         result_path = self.create_image_with_quote(media_path, quote)
-                    else:  # video
+                    else:
                         result_path = self.create_video_thumbnail(media_path, quote)
                     
                     if result_path and os.path.exists(result_path):
@@ -579,18 +565,15 @@ Use the buttons below to get started! 🚀
                         })
                         created += 1
                         
-                    # Small delay to prevent overwhelming the system
-                    await asyncio.sleep(0.5)
+                    await asyncio.sleep(0.1)
                         
                 except Exception as e:
                     logger.error(f"Error with combination {media_index}-{quote_index}: {e}")
                     continue
         
-        # Clean up processing flag
         if user_id in self.processing_flags:
             del self.processing_flags[user_id]
         
-        # Send all created reels with save buttons
         if created > 0:
             await processing_msg.edit_text(f"✅ *Created {created} reels! Sending them now...*", parse_mode='Markdown')
             
@@ -612,7 +595,7 @@ Use the buttons below to get started! 🚀
                                 reply_markup=self.get_save_keyboard(i),
                                 parse_mode='Markdown'
                             )
-                        await asyncio.sleep(1)  # Rate limiting
+                        await asyncio.sleep(0.5)
                         
                 except Exception as e:
                     logger.error(f"Error sending reel {i}: {e}")
@@ -702,7 +685,7 @@ Use the buttons below to get started! 🚀
                             caption=f"Reel {i+1}\n{media_data['quote']}"
                         )
                     sent += 1
-                    await asyncio.sleep(1)  # Rate limiting
+                    await asyncio.sleep(0.5)
             except Exception as e:
                 logger.error(f"Error saving reel {i}: {e}")
                 continue
@@ -714,14 +697,12 @@ Use the buttons below to get started! 🚀
         """Reset everything"""
         user_id = update.effective_user.id
         
-        # Stop any ongoing process
         if user_id in self.processing_flags:
             self.processing_flags[user_id] = False
         
         if user_id in self.user_sessions:
             session = self.user_sessions[user_id]
             
-            # Clean up all temporary files
             for media in session['photos'] + session['videos']:
                 try:
                     if os.path.exists(media['file_path']):
@@ -736,7 +717,6 @@ Use the buttons below to get started! 🚀
                 except:
                     pass
             
-            # Reset session
             self.user_sessions[user_id] = {'photos': [], 'videos': [], 'quotes': [], 'processed_media': []}
         
         await update.message.reply_text(
@@ -746,72 +726,138 @@ Use the buttons below to get started! 🚀
         )
         return MAIN_MENU
 
-def run_bot():
-    """Run the bot with polling"""
-    try:
-        bot = IslamicReelsBot()
-        
-        application = Application.builder().token(BOT_TOKEN).build()
-        
-        conv_handler = ConversationHandler(
-            entry_points=[CommandHandler('start', bot.start)],
-            states={
-                MAIN_MENU: [
-                    MessageHandler(filters.Regex('^📤 Upload Media$'), bot.handle_upload_media),
-                    MessageHandler(filters.Regex('^📝 Add Quotes$'), bot.handle_add_quotes),
-                    MessageHandler(filters.Regex('^🎬 Make Reels$'), bot.handle_make_reels),
-                    MessageHandler(filters.Regex('^💾 Save All$'), bot.handle_save_all),
-                    MessageHandler(filters.Regex('^🛑 Stop Process$'), bot.handle_stop_process),
-                    MessageHandler(filters.Regex('^🔄 Reset$'), bot.handle_reset),
-                ],
-                UPLOADING_MEDIA: [
-                    MessageHandler(filters.PHOTO | filters.VIDEO | filters.Document.ALL, bot.handle_media),
-                    MessageHandler(filters.Regex('^📝 Add Quotes$'), bot.handle_add_quotes),
-                ],
-                ADDING_QUOTES: [
-                    MessageHandler(filters.TEXT & ~filters.COMMAND, bot.handle_quotes)
-                ]
-            },
-            fallbacks=[CommandHandler('start', bot.start)]
-        )
-        
-        application.add_handler(CallbackQueryHandler(bot.handle_save_callback, pattern="^save_"))
-        application.add_handler(conv_handler)
-        
-        print("🤖 Islamic Reels Bot Starting...")
-        print("✅ Bot is running with polling!")
-        print("🚀 Ready to receive messages...")
-        
-        application.run_polling(drop_pending_updates=True)
-        
-    except Exception as e:
-        print(f"❌ Bot error: {e}")
-        raise
-
-def main():
-    """Main function with error handling"""
-    max_retries = 3
-    retry_delay = 10
+class BotRunner:
+    def __init__(self):
+        self.bot = IslamicReelsBot()
+        self.application = None
+        self.is_running = False
     
-    for attempt in range(max_retries):
+    def setup_application(self):
+        """Setup the telegram application"""
         try:
-            print(f"🚀 Starting bot (attempt {attempt + 1}/{max_retries})...")
-            run_bot()
+            self.application = Application.builder().token(BOT_TOKEN).build()
+            
+            conv_handler = ConversationHandler(
+                entry_points=[CommandHandler('start', self.bot.start)],
+                states={
+                    MAIN_MENU: [
+                        MessageHandler(filters.Regex('^📤 Upload Media$'), self.bot.handle_upload_media),
+                        MessageHandler(filters.Regex('^📝 Add Quotes$'), self.bot.handle_add_quotes),
+                        MessageHandler(filters.Regex('^🎬 Make Reels$'), self.bot.handle_make_reels),
+                        MessageHandler(filters.Regex('^💾 Save All$'), self.bot.handle_save_all),
+                        MessageHandler(filters.Regex('^🛑 Stop Process$'), self.bot.handle_stop_process),
+                        MessageHandler(filters.Regex('^🔄 Reset$'), self.bot.handle_reset),
+                    ],
+                    UPLOADING_MEDIA: [
+                        MessageHandler(filters.PHOTO | filters.VIDEO | filters.Document.ALL, self.bot.handle_media),
+                        MessageHandler(filters.Regex('^📝 Add Quotes$'), self.bot.handle_add_quotes),
+                    ],
+                    ADDING_QUOTES: [
+                        MessageHandler(filters.TEXT & ~filters.COMMAND, self.bot.handle_quotes)
+                    ]
+                },
+                fallbacks=[CommandHandler('start', self.bot.start)]
+            )
+            
+            self.application.add_handler(CallbackQueryHandler(self.bot.handle_save_callback, pattern="^save_"))
+            self.application.add_handler(conv_handler)
+            
+            return True
         except Exception as e:
-            print(f"❌ Bot crashed: {e}")
-            if attempt < max_retries - 1:
-                print(f"🔄 Retrying in {retry_delay} seconds...")
-                time.sleep(retry_delay)
+            logger.error(f"Error setting up application: {e}")
+            return False
+    
+    async def run_bot(self):
+        """Run the bot with proper error handling"""
+        try:
+            if not self.application:
+                if not self.setup_application():
+                    return False
+            
+            print("🤖 Islamic Reels Bot Starting...")
+            print("✅ Bot is running with polling!")
+            print("🚀 Ready to receive messages...")
+            print("💫 Bot will run forever...")
+            
+            await self.application.initialize()
+            await self.application.start()
+            await self.application.updater.start_polling(
+                drop_pending_updates=True,
+                timeout=30,
+                pool_timeout=30
+            )
+            
+            self.is_running = True
+            print("🎉 Bot is now fully operational!")
+            
+            # Keep the bot running forever
+            while self.is_running:
+                await asyncio.sleep(1)
+                
+            return True
+            
+        except asyncio.CancelledError:
+            print("🛑 Bot stopped by user")
+            return False
+        except Exception as e:
+            logger.error(f"Bot error: {e}")
+            return False
+        finally:
+            await self.shutdown()
+    
+    async def shutdown(self):
+        """Properly shutdown the bot"""
+        try:
+            if self.application:
+                if self.application.updater:
+                    await self.application.updater.stop()
+                await self.application.stop()
+                await self.application.shutdown()
+            self.is_running = False
+            print("🔴 Bot shutdown complete")
+        except Exception as e:
+            logger.error(f"Error during shutdown: {e}")
+
+def signal_handler(signum, frame):
+    """Handle shutdown signals"""
+    print(f"\n🛑 Received signal {signum}, shutting down gracefully...")
+    sys.exit(0)
+
+async def main():
+    """Main function that runs forever"""
+    # Setup signal handlers for graceful shutdown
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
+    
+    runner = BotRunner()
+    
+    while True:
+        try:
+            print("=" * 60)
+            print("🕌 Islamic Reels Bot - LIFETIME VERSION")
+            print("🌍 Supports English & Arabic")
+            print("🎥 Photos & Videos Support")
+            print("💾 Save Direct to Device")
+            print("🛑 Stop Process Feature")
+            print("⏰ Running 24/7 Forever...")
+            print("=" * 60)
+            
+            success = await runner.run_bot()
+            
+            if not success:
+                print("🔄 Restarting bot in 5 seconds...")
+                await asyncio.sleep(5)
             else:
-                print("💥 Max retries reached. Bot stopped.")
+                break
+                
+        except KeyboardInterrupt:
+            print("\n🛑 Bot stopped by user")
+            break
+        except Exception as e:
+            print(f"💥 Unexpected error: {e}")
+            print("🔄 Restarting bot in 10 seconds...")
+            await asyncio.sleep(10)
 
 if __name__ == '__main__':
-    print("=" * 50)
-    print("🕌 Islamic Reels Bot - Lifetime Version")
-    print("🌍 Supports English & Arabic")
-    print("🎥 Photos & Videos")
-    print("💾 Save Direct to Device")
-    print("🛑 Stop Process Feature")
-    print("=" * 50)
-    
-    main()
+    # Run the bot forever
+    asyncio.run(main())
