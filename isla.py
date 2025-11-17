@@ -4,13 +4,12 @@ import asyncio
 import threading
 from telegram import Update, ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, ConversationHandler, CallbackQueryHandler
-from PIL import Image, ImageDraw, ImageFont, ImageSequence
+from PIL import Image, ImageDraw, ImageFont
 import arabic_reshaper
 from bidi.algorithm import get_display
 import logging
 import requests
-import subprocess
-import shutil
+import time
 
 # Set up logging
 logging.basicConfig(
@@ -47,15 +46,14 @@ class IslamicReelsBot:
         """Download basic Arabic fonts"""
         font_urls = {
             'amiri': 'https://github.com/alif-type/amiri/releases/download/0.113/amiri-0.113.zip',
-            'noto': 'https://github.com/googlefonts/noto-fonts/raw/main/hinted/ttf/NotoNaskhArabic/NotoNaskhArabic-Regular.ttf',
-            'arial': 'https://github.com/googlefonts/roboto/raw/main/src/hinted/Roboto-Regular.ttf'
+            'noto': 'https://github.com/googlefonts/noto-fonts/raw/main/hinted/ttf/NotoNaskhArabic/NotoNaskhArabic-Regular.ttf'
         }
         
         for name, url in font_urls.items():
             font_path = f'fonts/{name}.ttf'
             if not os.path.exists(font_path):
                 try:
-                    response = requests.get(url, timeout=10)
+                    response = requests.get(url, timeout=30)
                     if response.status_code == 200:
                         with open(font_path, 'wb') as f:
                             f.write(response.content)
@@ -72,10 +70,10 @@ class IslamicReelsBot:
         ]
         return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
     
-    def get_save_keyboard(self, media_index, media_type="image"):
+    def get_save_keyboard(self, media_index):
         """Create save button for each reel"""
         keyboard = [
-            [InlineKeyboardButton("💾 Save This Reel", callback_data=f"save_{media_type}_{media_index}")]
+            [InlineKeyboardButton("💾 Save This Reel", callback_data=f"save_{media_index}")]
         ]
         return InlineKeyboardMarkup(keyboard)
     
@@ -86,10 +84,8 @@ class IslamicReelsBot:
         # Initialize user session
         self.user_sessions[user_id] = {
             'photos': [],
-            'videos': [],
             'quotes': [],
-            'processed_media': [],
-            'language': 'english'  # Default language
+            'processed_media': []
         }
         
         welcome_text = """
@@ -97,13 +93,12 @@ class IslamicReelsBot:
 
 *3 Simple Steps:*
 
-1. 📤 *Upload Media* - Send your images or videos
+1. 📤 *Upload Photos* - Send your images
 2. 📝 *Add Quotes* - Write your custom quotes  
-3. 🎬 *Make Reels* - Create media with quotes
+3. 🎬 *Make Reels* - Create images with quotes
 4. 💾 *Save* - Save all reels directly to your device
 
 *New Features:*
-• Supports both Images & Videos 🎥
 • Multiple languages supported 🌍
 • Stop processing anytime 🛑
 
@@ -112,7 +107,6 @@ class IslamicReelsBot:
 
 *Current Status:*
 📷 Photos: 0
-🎥 Videos: 0
 📝 Quotes: 0
 🎬 Ready: 0
 
@@ -135,11 +129,11 @@ Use the buttons below!
             return MAIN_MENU
         
         await update.message.reply_text(
-            "📤 *Send your photos or videos*:\n\n"
-            "• Send multiple photos/videos one by one\n"
+            "📤 *Send your photos*:\n\n"
+            "• Send multiple photos one by one\n"
             "• Click '📝 Add Quotes' when done\n"
-            "• Supported formats: JPG, PNG, MP4, MOV\n\n"
-            "*Tip:* Upload 1 media + multiple quotes to create multiple reels from the same media!",
+            "• Supported formats: JPG, PNG\n\n"
+            "*Tip:* Upload 1 photo + multiple quotes to create multiple reels from the same image!",
             parse_mode='Markdown'
         )
         return UPLOADING_MEDIA
@@ -172,58 +166,11 @@ Use the buttons below!
                     f"✅ Photo {count} received!",
                     reply_markup=self.get_main_keyboard()
                 )
-                
-            elif update.message.video:
-                # Handle video upload
-                video_file = await update.message.video.get_file()
-                
-                with tempfile.NamedTemporaryFile(delete=False, suffix='.mp4') as temp_file:
-                    await video_file.download_to_drive(temp_file.name)
-                    temp_path = temp_file.name
-                
-                self.user_sessions[user_id]['videos'].append({
-                    'file_path': temp_path,
-                    'file_id': video_file.file_id,
-                    'type': 'video'
-                })
-                
-                count = len(self.user_sessions[user_id]['videos'])
-                await update.message.reply_text(
-                    f"✅ Video {count} received!",
-                    reply_markup=self.get_main_keyboard()
-                )
-                
-            elif update.message.document:
-                # Handle document (could be video)
-                mime_type = update.message.document.mime_type
-                if mime_type and mime_type.startswith('video/'):
-                    video_file = await update.message.document.get_file()
-                    
-                    with tempfile.NamedTemporaryFile(delete=False, suffix='.mp4') as temp_file:
-                        await video_file.download_to_drive(temp_file.name)
-                        temp_path = temp_file.name
-                    
-                    self.user_sessions[user_id]['videos'].append({
-                        'file_path': temp_path,
-                        'file_id': video_file.file_id,
-                        'type': 'video'
-                    })
-                    
-                    count = len(self.user_sessions[user_id]['videos'])
-                    await update.message.reply_text(
-                        f"✅ Video {count} received!",
-                        reply_markup=self.get_main_keyboard()
-                    )
-                else:
-                    await update.message.reply_text(
-                        "❌ Unsupported file type. Please send photos or videos.",
-                        reply_markup=self.get_main_keyboard()
-                    )
         
         except Exception as e:
             logger.error(f"Error uploading media: {e}")
             await update.message.reply_text(
-                "❌ Error uploading media. Try again.",
+                "❌ Error uploading photo. Try again.",
                 reply_markup=self.get_main_keyboard()
             )
         
@@ -238,21 +185,19 @@ Use the buttons below!
             return MAIN_MENU
         
         photo_count = len(self.user_sessions[user_id]['photos'])
-        video_count = len(self.user_sessions[user_id]['videos'])
-        total_media = photo_count + video_count
         
-        if total_media == 0:
+        if photo_count == 0:
             await update.message.reply_text(
-                "❌ Please upload photos or videos first!",
+                "❌ Please upload photos first!",
                 reply_markup=self.get_main_keyboard()
             )
             return MAIN_MENU
         
         await update.message.reply_text(
             f"📝 *Add your quotes*:\n\n"
-            f"You have {photo_count} photos and {video_count} videos.\n"
+            f"You have {photo_count} photos.\n"
             f"Send your quotes (one quote per line):\n\n"
-            f"*New Feature:* If you upload 1 media and multiple quotes, you'll get multiple reels from the same media!\n\n"
+            f"*New Feature:* If you upload 1 photo and multiple quotes, you'll get multiple reels from the same image!\n\n"
             f"*يدعم اللغة العربية والحركات*\n"
             f"*Supports Arabic with Harakat*\n\n"
             f"*Example Arabic:*\n"
@@ -282,8 +227,6 @@ Use the buttons below!
             return ADDING_QUOTES
         
         photo_count = len(self.user_sessions[user_id]['photos'])
-        video_count = len(self.user_sessions[user_id]['videos'])
-        total_media = photo_count + video_count
         
         # Store quotes
         self.user_sessions[user_id]['quotes'] = quotes_list
@@ -291,9 +234,8 @@ Use the buttons below!
         await update.message.reply_text(
             f"✅ *Quotes received!*\n\n"
             f"📷 Photos: {photo_count}\n"
-            f"🎥 Videos: {video_count}\n"
             f"📝 Quotes: {len(quotes_list)}\n\n"
-            f"*Possible combinations:* {total_media} media × {len(quotes_list)} quotes = {total_media * len(quotes_list)} possible reels!\n\n"
+            f"*Possible combinations:* {photo_count} photos × {len(quotes_list)} quotes = {photo_count * len(quotes_list)} possible reels!\n\n"
             f"Click '🎬 Make Reels' to create!",
             reply_markup=self.get_main_keyboard(),
             parse_mode='Markdown'
@@ -312,8 +254,7 @@ Use the buttons below!
             arabic_fonts = [
                 'fonts/amiri.ttf',
                 'fonts/noto.ttf',
-                'fonts/tahoma.ttf',
-                '/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf'
+                'fonts/tahoma.ttf'
             ]
             
             for font_path in arabic_fonts:
@@ -326,8 +267,7 @@ Use the buttons below!
             # English fonts
             english_fonts = [
                 'fonts/arial.ttf',
-                'arial.ttf',
-                '/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf'
+                'arial.ttf'
             ]
             
             for font_path in english_fonts:
@@ -459,128 +399,6 @@ Use the buttons below!
             logger.error(f"Error creating image: {e}")
             return image_path
     
-    def create_video_with_quote_simple(self, video_path, quote):
-        """Create a simple video with quote by extracting a frame and converting to image"""
-        try:
-            # For simplicity, we'll extract the first frame and create an image
-            # This avoids complex video processing dependencies
-            
-            # Extract first frame from video
-            frame_path = tempfile.mktemp(suffix='_frame.jpg')
-            
-            # Try using ffmpeg if available
-            try:
-                cmd = ['ffmpeg', '-i', video_path, '-ss', '00:00:01', '-vframes', '1', frame_path]
-                result = subprocess.run(cmd, capture_output=True, timeout=30)
-                
-                if result.returncode != 0 or not os.path.exists(frame_path):
-                    # Fallback: use the original video path as image (won't work but handles error)
-                    logger.warning("FFmpeg failed, using fallback")
-                    return self.create_image_with_quote(video_path, quote)
-                    
-            except (subprocess.TimeoutExpired, FileNotFoundError, Exception) as e:
-                logger.warning(f"FFmpeg not available: {e}")
-                # If ffmpeg fails, create a simple colored background
-                return self.create_simple_video_fallback(quote)
-            
-            # Create image with quote from the frame
-            result_path = self.create_image_with_quote(frame_path, quote)
-            
-            # Clean up frame
-            try:
-                if os.path.exists(frame_path):
-                    os.unlink(frame_path)
-            except:
-                pass
-            
-            return result_path
-            
-        except Exception as e:
-            logger.error(f"Error creating simple video: {e}")
-            return self.create_simple_video_fallback(quote)
-    
-    def create_simple_video_fallback(self, quote):
-        """Create a simple image when video processing fails"""
-        try:
-            width, height = 1080, 1350
-            background = Image.new('RGB', (width, height), (30, 60, 90))  # Islamic blue color
-            
-            draw = ImageDraw.Draw(background)
-            is_arabic = self.is_arabic_text(quote)
-            
-            font_size = 60 if is_arabic else 50
-            font = self.get_font(font_size, is_arabic)
-            
-            lines = self.split_text_to_lines(quote, font, width * 0.8, is_arabic)
-            line_height = 80 if is_arabic else 70
-            total_height = len(lines) * line_height
-            text_y = (height - total_height) // 2
-            
-            # Draw decorative elements
-            draw.rectangle([50, text_y-60, width-50, text_y+total_height+60], fill=(0, 0, 0, 180), outline=(255, 255, 255), width=3)
-            
-            # Draw text lines
-            for i, line in enumerate(lines):
-                if not line.strip():
-                    continue
-                
-                if is_arabic:
-                    line = self.process_arabic_text(line)
-                
-                bbox = draw.textbbox((0, 0), line, font=font)
-                text_width = bbox[2] - bbox[0]
-                
-                if is_arabic:
-                    x_pos = (width - text_width) // 2 + 100  # Adjust for Arabic
-                else:
-                    x_pos = (width - text_width) // 2
-                
-                y_pos = text_y + (i * line_height)
-                
-                draw.text((x_pos, y_pos), line, font=font, fill=(255, 255, 255))
-            
-            output_path = tempfile.mktemp(suffix='_quote.jpg')
-            background.save(output_path, quality=95)
-            return output_path
-            
-        except Exception as e:
-            logger.error(f"Error in video fallback: {e}")
-            # Ultimate fallback - create text file
-            return self.create_text_fallback(quote)
-    
-    def create_text_fallback(self, quote):
-        """Create a simple text image as ultimate fallback"""
-        try:
-            width, height = 1080, 1350
-            img = Image.new('RGB', (width, height), (0, 0, 0))
-            draw = ImageDraw.Draw(img)
-            
-            # Use default font
-            try:
-                font = ImageFont.load_default()
-            except:
-                font = None
-            
-            lines = quote.split('\n')
-            y_pos = height // 2 - (len(lines) * 20)
-            
-            for i, line in enumerate(lines):
-                if font:
-                    bbox = draw.textbbox((0, 0), line, font=font)
-                    text_width = bbox[2] - bbox[0]
-                    x_pos = (width - text_width) // 2
-                    draw.text((x_pos, y_pos + (i * 40)), line, fill=(255, 255, 255), font=font)
-                else:
-                    # Without font, we can't center properly but we try
-                    draw.text((50, y_pos + (i * 40)), line, fill=(255, 255, 255))
-            
-            output_path = tempfile.mktemp(suffix='_quote.jpg')
-            img.save(output_path)
-            return output_path
-        except Exception as e:
-            logger.error(f"Error in text fallback: {e}")
-            return None
-    
     async def handle_stop_process(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Stop ongoing processing"""
         user_id = update.effective_user.id
@@ -609,14 +427,11 @@ Use the buttons below!
         
         session = self.user_sessions[user_id]
         photos = session['photos']
-        videos = session['videos']
         quotes = session['quotes']
         
-        all_media = photos + videos
-        
-        if not all_media or not quotes:
+        if not photos or not quotes:
             await update.message.reply_text(
-                "❌ Please upload both media and quotes first!",
+                "❌ Please upload both photos and quotes first!",
                 reply_markup=self.get_main_keyboard()
             )
             return MAIN_MENU
@@ -627,10 +442,10 @@ Use the buttons below!
         
         processing_msg = await update.message.reply_text("🔄 Creating your reels...")
         
-        total_combinations = len(all_media) * len(quotes)
+        total_combinations = len(photos) * len(quotes)
         created = 0
         
-        for media_index, media in enumerate(all_media):
+        for photo_index, photo in enumerate(photos):
             for quote_index, quote in enumerate(quotes):
                 # Check if user stopped the process
                 if not self.processing_tasks.get(user_id, True):
@@ -641,26 +456,23 @@ Use the buttons below!
                     current_index = created + 1
                     await processing_msg.edit_text(f"🔄 Creating reel {current_index}/{total_combinations}...")
                     
-                    media_path = media['file_path']
+                    photo_path = photo['file_path']
                     
-                    if media['type'] == 'image':
-                        result_path = self.create_image_with_quote(media_path, quote)
-                    else:  # video
-                        result_path = self.create_video_with_quote_simple(media_path, quote)
+                    # Create image with quote
+                    result_path = self.create_image_with_quote(photo_path, quote)
                     
                     if result_path and os.path.exists(result_path):
                         session['processed_media'].append({
                             'media_path': result_path,
                             'quote': quote,
-                            'media_index': media_index,
+                            'photo_index': photo_index,
                             'quote_index': quote_index,
-                            'index': created,
-                            'type': 'image'  # All outputs are images for simplicity
+                            'index': created
                         })
                         created += 1
                         
                 except Exception as e:
-                    logger.error(f"Error with combination {media_index}-{quote_index}: {e}")
+                    logger.error(f"Error with combination {photo_index}-{quote_index}: {e}")
                     continue
         
         # Clean up processing task
@@ -676,15 +488,13 @@ Use the buttons below!
                     if os.path.exists(media_data['media_path']):
                         with open(media_data['media_path'], 'rb') as f:
                             caption = f"**Reel {i+1}**\n{media_data['quote']}"
+                            if len(photos) == 1 and len(quotes) > 1:
+                                caption += f"\n\n📷 Photo 1 • 📝 Quote {media_data['quote_index'] + 1}"
                             
-                            if len(all_media) == 1 and len(quotes) > 1:
-                                caption += f"\n\n📝 Quote {media_data['quote_index'] + 1}"
-                            
-                            # Always send as photo since videos are converted to images
                             await update.message.reply_photo(
                                 photo=f,
                                 caption=caption,
-                                reply_markup=self.get_save_keyboard(i, 'image'),
+                                reply_markup=self.get_save_keyboard(i),
                                 parse_mode='Markdown'
                             )
                         await asyncio.sleep(1)
@@ -697,7 +507,6 @@ Use the buttons below!
                 f"🎉 *All {created} reels sent!*\n\n"
                 f"*Combination Summary:*\n"
                 f"📷 Photos: {len(photos)}\n"
-                f"🎥 Videos: {len(videos)} (converted to images)\n"
                 f"📝 Quotes: {len(quotes)}\n"
                 f"🎬 Created: {created} reels\n\n"
                 f"Click the 💾 button under each reel to save it directly to your device!",
@@ -706,7 +515,7 @@ Use the buttons below!
             )
         else:
             await processing_msg.edit_text(
-                "❌ No reels were created. Please try again with different media.",
+                "❌ No reels were created. Please try again with different photos.",
                 reply_markup=self.get_main_keyboard()
             )
         
@@ -722,9 +531,7 @@ Use the buttons below!
         
         if data.startswith('save_'):
             try:
-                parts = data.split('_')
-                media_type = parts[1]
-                media_index = int(parts[2])
+                media_index = int(data.split('_')[1])
                 
                 if user_id in self.user_sessions:
                     session = self.user_sessions[user_id]
@@ -799,10 +606,10 @@ Use the buttons below!
             session = self.user_sessions[user_id]
             
             # Clean up all temporary files
-            for media in session['photos'] + session['videos']:
+            for photo in session['photos']:
                 try:
-                    if os.path.exists(media['file_path']):
-                        os.unlink(media['file_path'])
+                    if os.path.exists(photo['file_path']):
+                        os.unlink(photo['file_path'])
                 except:
                     pass
             
@@ -813,7 +620,7 @@ Use the buttons below!
                 except:
                     pass
             
-            self.user_sessions[user_id] = {'photos': [], 'videos': [], 'quotes': [], 'processed_media': []}
+            self.user_sessions[user_id] = {'photos': [], 'quotes': [], 'processed_media': []}
         
         await update.message.reply_text(
             "🔄 Reset complete! Start fresh.",
@@ -825,8 +632,10 @@ def run_bot():
     """Run the bot with polling"""
     bot = IslamicReelsBot()
     
+    # Create application
     application = Application.builder().token(BOT_TOKEN).build()
     
+    # Add handlers
     conv_handler = ConversationHandler(
         entry_points=[CommandHandler('start', bot.start)],
         states={
@@ -839,7 +648,7 @@ def run_bot():
                 MessageHandler(filters.Regex('^🔄 Reset$'), bot.handle_reset),
             ],
             UPLOADING_MEDIA: [
-                MessageHandler(filters.PHOTO | filters.VIDEO | filters.Document.ALL, bot.handle_media),
+                MessageHandler(filters.PHOTO, bot.handle_media),
                 MessageHandler(filters.Regex('^📝 Add Quotes$'), bot.handle_add_quotes),
             ],
             ADDING_QUOTES: [
@@ -853,14 +662,62 @@ def run_bot():
     application.add_handler(conv_handler)
     
     print("🤖 Islamic Reels Bot Starting...")
-    print("Bot is running with polling! Press Ctrl+C to stop")
+    print("Bot is running with polling!")
     
-    application.run_polling()
+    # Start the bot
+    application.run_polling(
+        drop_pending_updates=True,
+        timeout=30,
+        pool_timeout=30
+    )
+
+def main():
+    """Main function to run the bot"""
+    max_retries = 5
+    retry_delay = 10
+    
+    for attempt in range(max_retries):
+        try:
+            print(f"🚀 Starting bot (attempt {attempt + 1}/{max_retries})...")
+            run_bot()
+        except Exception as e:
+            print(f"❌ Bot crashed with error: {e}")
+            if attempt < max_retries - 1:
+                print(f"🔄 Retrying in {retry_delay} seconds...")
+                time.sleep(retry_delay)
+                retry_delay *= 2  # Exponential backoff
+            else:
+                print("💥 Max retries reached. Bot stopped.")
+                raise
 
 if __name__ == '__main__':
+    # For Render, we need to run as a background worker
+    print("🔧 Starting as Background Worker...")
+    
+    # Check if we're on Render
     if os.environ.get('RENDER'):
-        print("🚀 Starting bot on Render...")
-        run_bot()
-    else:
-        print("🔧 Starting bot locally...")
-        run_bot()
+        print("🌐 Running on Render Cloud...")
+        # Add health check endpoint for Render
+        from http.server import HTTPServer, BaseHTTPRequestHandler
+        import threading
+        
+        class HealthHandler(BaseHTTPRequestHandler):
+            def do_GET(self):
+                self.send_response(200)
+                self.end_headers()
+                self.wfile.write(b'OK')
+            
+            def log_message(self, format, *args):
+                return  # Disable logging
+        
+        def start_health_server():
+            server = HTTPServer(('0.0.0.0', 8080), HealthHandler)
+            print("❤️ Health check server running on port 8080")
+            server.serve_forever()
+        
+        # Start health server in background thread
+        health_thread = threading.Thread(target=start_health_server, daemon=True)
+        health_thread.start()
+    
+    # Start the bot
+    main()
