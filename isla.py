@@ -1,3 +1,29 @@
+from keep_alive import keep_alive
+import requests
+
+# Start keep-alive server BEFORE starting the bot
+keep_alive()
+
+# Add this function for self-pinging
+def self_ping():
+    """Ping ourselves to stay awake"""
+    try:
+        requests.get("https://your-bot-name.onrender.com/", timeout=10)
+        print(f"✅ Self-ping at {time.strftime('%Y-%m-%d %H:%M:%S')}")
+    except Exception as e:
+        print(f"⚠️ Self-ping failed: {e}")
+
+# Start self-pinging in background
+import threading
+def start_self_ping():
+    while True:
+        self_ping()
+        time.sleep(300)  # 5 minutes
+
+ping_thread = threading.Thread(target=start_self_ping, daemon=True)
+ping_thread.start()
+
+
 import os
 import tempfile
 import asyncio
