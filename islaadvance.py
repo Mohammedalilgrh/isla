@@ -41,6 +41,7 @@ import numpy as np
 import pyttsx3
 from concurrent.futures import ThreadPoolExecutor
 import json
+import re
 
 # Set up logging
 logging.basicConfig(
@@ -132,6 +133,7 @@ class IslamicReelsBot:
         keyboard = [
             [KeyboardButton("🎨 Change Theme"), KeyboardButton("📐 Change Layout")],
             [KeyboardButton("🔤 Font Size"), KeyboardButton("⏱️ Duration")],
+            [KeyboardButton("🎥 Output Format"), KeyboardButton("⚡ Quality")],
             [KeyboardButton("🔙 Back to Main")]
         ]
         return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
@@ -142,6 +144,58 @@ class IslamicReelsBot:
             [KeyboardButton("🔊 Enable Voice"), KeyboardButton("🔇 Disable Voice")],
             [KeyboardButton("👨‍💼 Change Voice"), KeyboardButton("🎵 Add Background Music")],
             [KeyboardButton("🔙 Back to Main")]
+        ]
+        return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+    
+    def get_theme_keyboard(self):
+        """Theme selection keyboard"""
+        keyboard = [
+            [KeyboardButton("🕌 Islamic Blue"), KeyboardButton("🌟 Golden")],
+            [KeyboardButton("🌿 Green"), KeyboardButton("⚫ Dark")],
+            [KeyboardButton("⚪ Light"), KeyboardButton("🔙 Back to Settings")]
+        ]
+        return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+    
+    def get_layout_keyboard(self):
+        """Layout selection keyboard"""
+        keyboard = [
+            [KeyboardButton("🎯 Centered"), KeyboardButton("⬇️ Bottom")],
+            [KeyboardButton("⬆️ Top"), KeyboardButton("📊 Split")],
+            [KeyboardButton("🔙 Back to Settings")]
+        ]
+        return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+    
+    def get_format_keyboard(self):
+        """Output format keyboard"""
+        keyboard = [
+            [KeyboardButton("🖼️ Image"), KeyboardButton("🎥 Video")],
+            [KeyboardButton("🔙 Back to Settings")]
+        ]
+        return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+    
+    def get_quality_keyboard(self):
+        """Quality selection keyboard"""
+        keyboard = [
+            [KeyboardButton("🚀 Fast"), KeyboardButton("⚡ Medium")],
+            [KeyboardButton("🌟 High"), KeyboardButton("🔙 Back to Settings")]
+        ]
+        return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+    
+    def get_font_size_keyboard(self):
+        """Font size selection keyboard"""
+        keyboard = [
+            [KeyboardButton("🔤 Small (40)"), KeyboardButton("🔤 Medium (60)")],
+            [KeyboardButton("🔤 Large (80)"), KeyboardButton("🔤 X-Large (100)")],
+            [KeyboardButton("🔙 Back to Settings")]
+        ]
+        return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+    
+    def get_duration_keyboard(self):
+        """Duration selection keyboard"""
+        keyboard = [
+            [KeyboardButton("⏱️ 5s"), KeyboardButton("⏱️ 10s")],
+            [KeyboardButton("⏱️ 15s"), KeyboardButton("⏱️ 20s")],
+            [KeyboardButton("🔙 Back to Settings")]
         ]
         return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
     
@@ -173,7 +227,7 @@ class IslamicReelsBot:
                 'voice_enabled': False,
                 'background_music': None,
                 'output_format': 'video',  # 'image' or 'video'
-                'bulk_quality': 'medium'
+                'quality': 'medium'
             }
         }
         
@@ -234,13 +288,13 @@ Use the buttons below to get started! 🚀
 🔤 *Font Size:* {settings['font_size']}
 ⏱️ *Duration:* {settings['duration']} seconds
 🎥 *Output Format:* {settings['output_format']}
-🚀 *Bulk Quality:* {settings['bulk_quality']}
+⚡ *Quality:* {settings['quality']}
 
 *Available Options:*
 • *Themes:* islamic_blue, golden, green, dark, light
 • *Layouts:* centered, bottom, top, split
 • *Output:* image, video
-• *Quality:* low, medium, high
+• *Quality:* fast, medium, high
         """
         
         await update.message.reply_text(
@@ -423,7 +477,7 @@ Use the buttons below to get started! 🚀
         await update.message.reply_text(
             f"📝 *Add Your Quotes*:\n\n"
             f"You have {photo_count} photos and {video_count} videos.\n"
-            f"Send your quotes (one quote per line):\n\n"
+            f"Send your quotes (separate each reel with a blank line):\n\n"
             f"🚀 *Bulk Creation Ready:*\n"
             f"• {total_media} media × your quotes = automatic bulk reels!\n"
             f"• Videos with text-to-speech voiceovers\n"
@@ -432,18 +486,27 @@ Use the buttons below to get started! 🚀
             f"• Arabic with full harakat support\n"
             f"• English and other languages\n"
             f"• Automatic language detection\n\n"
-            f"📚 *Examples:*\n"
-            f"*Arabic:*\n"
-            f"رَّبِّ أَدْخِلْنِي مُدْخَلَ صِدْقٍ\nوَأَخْرِجْنِي مُخْرَجَ صِدْقٍ\n\n"
-            f"*English:*\n"
-            f"O my Lord! Let my entry be good\nAnd likewise my exit be good",
+            f"📚 *Example Format:*\n"
+            f"رَّبِّ أَدْخِلْنِي مُدْخَلَ صِدْقٍ\nوَأَخْرِجْنِي مُخْرَجَ صِدْقٍ\\(This creates 1 reel\\)\n\n"
+            f"O my Lord! Let my entry be good\nAnd likewise my exit be good\\(This creates another reel\\)\n\n"
+            f"💡 *Each blank line creates a new reel!*",
             parse_mode='Markdown',
             reply_markup=self.get_main_keyboard()
         )
         return ADDING_QUOTES
     
+    def parse_quotes_text(self, text):
+        """Parse quotes text and split by blank lines to create separate reels"""
+        # Split by one or more blank lines (multiple newlines)
+        quote_blocks = re.split(r'\n\s*\n', text.strip())
+        
+        # Filter out empty blocks and strip each block
+        quotes_list = [block.strip() for block in quote_blocks if block.strip()]
+        
+        return quotes_list
+    
     async def handle_quotes(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Process user quotes with enhanced features"""
+        """Process user quotes with enhanced features - CORRECTED VERSION"""
         user_id = update.effective_user.id
         
         if user_id not in self.user_sessions:
@@ -451,11 +514,13 @@ Use the buttons below to get started! 🚀
             return MAIN_MENU
         
         quotes_text = update.message.text
-        quotes_list = [q.strip() for q in quotes_text.split('\n') if q.strip()]
+        
+        # Parse quotes using the corrected method
+        quotes_list = self.parse_quotes_text(quotes_text)
         
         if not quotes_list:
             await update.message.reply_text(
-                "❌ No quotes found. Please send valid quotes:",
+                "❌ No quotes found. Please send valid quotes separated by blank lines:",
                 reply_markup=self.get_main_keyboard()
             )
             return ADDING_QUOTES
@@ -472,7 +537,7 @@ Use the buttons below to get started! 🚀
             f"📊 *Your Collection:*\n"
             f"📷 Photos: {photo_count}\n"
             f"🎥 Videos: {video_count}\n"
-            f"📝 Quotes: {len(quotes_list)}\n\n"
+            f"📝 Quotes: {len(quotes_list)} \\(each will create a separate reel\\)\n\n"
             f"🚀 *Bulk Creation Potential:*\n"
             f"• {total_media} × {len(quotes_list)} = {total_media * len(quotes_list)} reels!\n"
             f"• Videos with voiceovers: {'✅' if self.user_sessions[user_id]['settings']['voice_enabled'] else '❌'}\n"
@@ -576,15 +641,19 @@ Use the buttons below to get started! 🚀
             # Load video or create from image
             if media_path.endswith(('.mp4', '.mov', '.avi')):
                 clip = VideoFileClip(media_path)
+                # Use original duration or settings duration, whichever is shorter
+                duration = min(clip.duration, settings['duration'])
+                clip = clip.subclip(0, duration)
             else:
                 # Create video from image
-                clip = ColorClip((1080, 1920), color=(0, 0, 0), duration=settings['duration'])
-                img_clip = ImageClip(media_path).set_duration(settings['duration'])
-                clip = CompositeVideoClip([clip, img_clip.set_position('center')])
+                duration = settings['duration']
+                img_clip = ImageClip(media_path).set_duration(duration)
+                clip = img_clip.resize(height=1920) if img_clip.h > 1920 else img_clip
             
-            # Resize for consistency
+            # Resize for consistency (1080x1920 for reels)
             clip = clip.resize(height=1920) if clip.h > 1920 else clip
-            clip = clip.crop(x_center=clip.w/2, y_center=clip.h/2, width=1080, height=1920)
+            if clip.w > 1080:
+                clip = clip.crop(x_center=clip.w/2, y_center=clip.h/2, width=1080, height=1920)
             
             # Create text clip
             is_arabic = self.is_arabic_text(quote)
@@ -601,7 +670,8 @@ Use the buttons below to get started! 🚀
                 color='white',
                 font=font.name if hasattr(font, 'name') else 'Arial',
                 stroke_color='black',
-                stroke_width=2
+                stroke_width=2,
+                method='label'
             )
             
             # Position text based on layout
@@ -612,12 +682,15 @@ Use the buttons below to get started! 🚀
             elif settings['layout'] == 'top':
                 text_clip = text_clip.set_position(('center', 200))
             
+            # Set text duration
+            text_clip = text_clip.set_duration(duration)
+            
             # Add semi-transparent background to text
             text_bg = ColorClip(
-                (1080, 300), 
+                (1080, 400), 
                 color=(0, 0, 0, 180), 
-                duration=clip.duration
-            ).set_position(('center', 800))
+                duration=duration
+            ).set_position(('center', 760))
             
             # Composite everything
             final_clip = CompositeVideoClip([clip, text_bg, text_clip])
@@ -627,7 +700,18 @@ Use the buttons below to get started! 🚀
                 tts_path = tempfile.mktemp(suffix='.mp3')
                 if self.create_tts_audio(quote, tts_path):
                     tts_audio = AudioFileClip(tts_path)
+                    # Ensure audio doesn't exceed video duration
+                    if tts_audio.duration > duration:
+                        tts_audio = tts_audio.subclip(0, duration)
                     final_clip = final_clip.set_audio(tts_audio)
+            
+            # Set quality based on settings
+            if settings['quality'] == 'fast':
+                bitrate = '1000k'
+            elif settings['quality'] == 'high':
+                bitrate = '5000k'
+            else:  # medium
+                bitrate = '2500k'
             
             # Write output
             final_clip.write_videofile(
@@ -636,12 +720,16 @@ Use the buttons below to get started! 🚀
                 codec='libx264',
                 audio_codec='aac' if settings['voice_enabled'] else None,
                 verbose=False,
-                logger=None
+                logger=None,
+                bitrate=bitrate,
+                threads=4
             )
             
             # Cleanup
             clip.close()
             final_clip.close()
+            if 'tts_audio' in locals():
+                tts_audio.close()
             
             return True
             
@@ -714,7 +802,7 @@ Use the buttons below to get started! 🚀
             return image_path
     
     async def handle_bulk_create(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Handle bulk reel creation"""
+        """Handle bulk reel creation - CORRECTED VERSION"""
         user_id = update.effective_user.id
         
         if user_id not in self.user_sessions:
@@ -744,7 +832,8 @@ Use the buttons below to get started! 🚀
             "🚀 *Starting Bulk Creation...*\n\n"
             f"📊 Processing {len(all_media)} media × {len(quotes)} quotes = {len(all_media) * len(quotes)} reels\n"
             f"🎥 Output: {settings['output_format'].upper()}\n"
-            f"🔊 Voice: {'✅ ON' if settings['voice_enabled'] else '❌ OFF'}\n\n"
+            f"🔊 Voice: {'✅ ON' if settings['voice_enabled'] else '❌ OFF'}\n"
+            f"⚡ Quality: {settings['quality'].upper()}\n\n"
             "⏳ This may take a few minutes...",
             parse_mode='Markdown'
         )
@@ -773,7 +862,6 @@ Use the buttons below to get started! 🚀
                     )
                     
                     media_path = media['file_path']
-                    output_filename = f"reel_{media_index}_{quote_index}"
                     
                     if settings['output_format'] == 'video':
                         output_path = tempfile.mktemp(suffix='_reel.mp4')
@@ -814,7 +902,7 @@ Use the buttons below to get started! 🚀
             )
             
             # Send reels in batches
-            batch_size = 5
+            batch_size = 3  # Reduced for stability
             for i in range(0, len(session['processed_media']), batch_size):
                 batch = session['processed_media'][i:i + batch_size]
                 
@@ -868,7 +956,6 @@ Use the buttons below to get started! 🚀
     
     async def handle_make_reels(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Create individual reels (legacy method)"""
-        # Implementation similar to before but using new creation methods
         user_id = update.effective_user.id
         
         if user_id not in self.user_sessions:
@@ -879,10 +966,224 @@ Use the buttons below to get started! 🚀
         settings = session['settings']
         
         # Set output to image for legacy method
+        original_format = settings['output_format']
         settings['output_format'] = 'image'
         
         await self.handle_bulk_create(update, context)
+        
+        # Restore original format
+        settings['output_format'] = original_format
         return MAIN_MENU
+    
+    async def handle_settings_option(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle settings sub-options"""
+        user_id = update.effective_user.id
+        text = update.message.text
+        
+        if user_id not in self.user_sessions:
+            await self.start(update, context)
+            return REEL_SETTINGS
+        
+        settings = self.user_sessions[user_id]['settings']
+        
+        if text == "🎨 Change Theme":
+            await update.message.reply_text(
+                "🎨 *Select Theme:*\n\n"
+                "• 🕌 Islamic Blue - Blue Islamic patterns\n"
+                "• 🌟 Golden - Golden elegant theme\n"
+                "• 🌿 Green - Peaceful green theme\n"
+                "• ⚫ Dark - Dark mode\n"
+                "• ⚪ Light - Light mode",
+                reply_markup=self.get_theme_keyboard(),
+                parse_mode='Markdown'
+            )
+            return REEL_SETTINGS
+        
+        elif text == "📐 Change Layout":
+            await update.message.reply_text(
+                "📐 *Select Layout:*\n\n"
+                "• 🎯 Centered - Text in center\n"
+                "• ⬇️ Bottom - Text at bottom\n"
+                "• ⬆️ Top - Text at top\n"
+                "• 📊 Split - Split screen layout",
+                reply_markup=self.get_layout_keyboard(),
+                parse_mode='Markdown'
+            )
+            return REEL_SETTINGS
+        
+        elif text == "🔤 Font Size":
+            await update.message.reply_text(
+                "🔤 *Select Font Size:*\n\n"
+                "• Small (40) - For long texts\n"
+                "• Medium (60) - Balanced size\n"
+                "• Large (80) - Emphasized text\n"
+                "• X-Large (100) - Maximum visibility",
+                reply_markup=self.get_font_size_keyboard(),
+                parse_mode='Markdown'
+            )
+            return REEL_SETTINGS
+        
+        elif text == "⏱️ Duration":
+            await update.message.reply_text(
+                "⏱️ *Select Duration:*\n\n"
+                "• 5s - Quick reels\n"
+                "• 10s - Standard duration\n"
+                "• 15s - Extended viewing\n"
+                "• 20s - Maximum duration",
+                reply_markup=self.get_duration_keyboard(),
+                parse_mode='Markdown'
+            )
+            return REEL_SETTINGS
+        
+        elif text == "🎥 Output Format":
+            await update.message.reply_text(
+                "🎥 *Select Output Format:*\n\n"
+                "• 🖼️ Image - Static images\n"
+                "• 🎥 Video - Animated videos",
+                reply_markup=self.get_format_keyboard(),
+                parse_mode='Markdown'
+            )
+            return REEL_SETTINGS
+        
+        elif text == "⚡ Quality":
+            await update.message.reply_text(
+                "⚡ *Select Quality:*\n\n"
+                "• 🚀 Fast - Lower quality, faster processing\n"
+                "• ⚡ Medium - Balanced quality/speed\n"
+                "• 🌟 High - Best quality, slower processing",
+                reply_markup=self.get_quality_keyboard(),
+                parse_mode='Markdown'
+            )
+            return REEL_SETTINGS
+        
+        elif text == "🔙 Back to Main":
+            await self.start(update, context)
+            return MAIN_MENU
+        
+        # Handle theme selections
+        elif text in ["🕌 Islamic Blue", "🌟 Golden", "🌿 Green", "⚫ Dark", "⚪ Light"]:
+            theme_map = {
+                "🕌 Islamic Blue": "islamic_blue",
+                "🌟 Golden": "golden", 
+                "🌿 Green": "green",
+                "⚫ Dark": "dark",
+                "⚪ Light": "light"
+            }
+            settings['theme'] = theme_map[text]
+            await update.message.reply_text(f"✅ Theme set to: {text}")
+            await self.handle_reel_settings(update, context)
+            return REEL_SETTINGS
+        
+        # Handle layout selections
+        elif text in ["🎯 Centered", "⬇️ Bottom", "⬆️ Top", "📊 Split"]:
+            layout_map = {
+                "🎯 Centered": "centered",
+                "⬇️ Bottom": "bottom",
+                "⬆️ Top": "top",
+                "📊 Split": "split"
+            }
+            settings['layout'] = layout_map[text]
+            await update.message.reply_text(f"✅ Layout set to: {text}")
+            await self.handle_reel_settings(update, context)
+            return REEL_SETTINGS
+        
+        # Handle font size selections
+        elif text in ["🔤 Small (40)", "🔤 Medium (60)", "🔤 Large (80)", "🔤 X-Large (100)"]:
+            size_map = {
+                "🔤 Small (40)": 40,
+                "🔤 Medium (60)": 60,
+                "🔤 Large (80)": 80,
+                "🔤 X-Large (100)": 100
+            }
+            settings['font_size'] = size_map[text]
+            await update.message.reply_text(f"✅ Font size set to: {text}")
+            await self.handle_reel_settings(update, context)
+            return REEL_SETTINGS
+        
+        # Handle duration selections
+        elif text in ["⏱️ 5s", "⏱️ 10s", "⏱️ 15s", "⏱️ 20s"]:
+            duration_map = {
+                "⏱️ 5s": 5,
+                "⏱️ 10s": 10,
+                "⏱️ 15s": 15,
+                "⏱️ 20s": 20
+            }
+            settings['duration'] = duration_map[text]
+            await update.message.reply_text(f"✅ Duration set to: {text}")
+            await self.handle_reel_settings(update, context)
+            return REEL_SETTINGS
+        
+        # Handle format selections
+        elif text in ["🖼️ Image", "🎥 Video"]:
+            format_map = {
+                "🖼️ Image": "image",
+                "🎥 Video": "video"
+            }
+            settings['output_format'] = format_map[text]
+            await update.message.reply_text(f"✅ Output format set to: {text}")
+            await self.handle_reel_settings(update, context)
+            return REEL_SETTINGS
+        
+        # Handle quality selections
+        elif text in ["🚀 Fast", "⚡ Medium", "🌟 High"]:
+            quality_map = {
+                "🚀 Fast": "fast",
+                "⚡ Medium": "medium",
+                "🌟 High": "high"
+            }
+            settings['quality'] = quality_map[text]
+            await update.message.reply_text(f"✅ Quality set to: {text}")
+            await self.handle_reel_settings(update, context)
+            return REEL_SETTINGS
+        
+        return REEL_SETTINGS
+    
+    async def handle_voice_option(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle voice settings options"""
+        user_id = update.effective_user.id
+        text = update.message.text
+        
+        if user_id not in self.user_sessions:
+            await self.start(update, context)
+            return VOICE_SETTINGS
+        
+        settings = self.user_sessions[user_id]['settings']
+        
+        if text == "🔊 Enable Voice":
+            settings['voice_enabled'] = True
+            await update.message.reply_text("✅ Voice enabled! TTS will be added to videos.")
+            await self.handle_voice_settings(update, context)
+            return VOICE_SETTINGS
+        
+        elif text == "🔇 Disable Voice":
+            settings['voice_enabled'] = False
+            await update.message.reply_text("🔇 Voice disabled!")
+            await self.handle_voice_settings(update, context)
+            return VOICE_SETTINGS
+        
+        elif text == "👨‍💼 Change Voice":
+            await update.message.reply_text(
+                "🎙️ *Voice Options:*\n\n"
+                "Currently using system default voice.\n"
+                "Future updates will include multiple voice options.",
+                parse_mode='Markdown'
+            )
+            return VOICE_SETTINGS
+        
+        elif text == "🎵 Add Background Music":
+            await update.message.reply_text(
+                "🎵 *Background Music:*\n\n"
+                "Music integration coming in future updates!\n"
+                "Currently focusing on TTS voice functionality.",
+                parse_mode='Markdown'
+            )
+            return VOICE_SETTINGS
+        
+        elif text == "🔙 Back to Main":
+            await self.start(update, context)
+            return MAIN_MENU
+        
+        return VOICE_SETTINGS
     
     async def handle_save_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle save button clicks for both images and videos"""
@@ -1020,7 +1321,7 @@ Use the buttons below to get started! 🚀
                 'settings': {
                     'theme': 'islamic_blue', 'layout': 'centered', 'font_size': 60,
                     'duration': 10, 'voice_enabled': False, 'background_music': None,
-                    'output_format': 'video', 'bulk_quality': 'medium'
+                    'output_format': 'video', 'quality': 'medium'
                 }
             }
         
@@ -1055,17 +1356,19 @@ def run_bot():
                 UPLOADING_MEDIA: [
                     MessageHandler(filters.PHOTO | filters.VIDEO | filters.Document.ALL, bot.handle_media),
                     MessageHandler(filters.Regex('^📝 Add Quotes$'), bot.handle_add_quotes),
+                    MessageHandler(filters.Regex('^🔙 Back to Main$'), bot.start),
                 ],
                 ADDING_QUOTES: [
-                    MessageHandler(filters.TEXT & ~filters.COMMAND, bot.handle_quotes)
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, bot.handle_quotes),
+                    MessageHandler(filters.Regex('^🔙 Back to Main$'), bot.start),
                 ],
                 REEL_SETTINGS: [
                     MessageHandler(filters.Regex('^🔙 Back to Main$'), bot.start),
-                    # Add more setting handlers here
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, bot.handle_settings_option),
                 ],
                 VOICE_SETTINGS: [
                     MessageHandler(filters.Regex('^🔙 Back to Main$'), bot.start),
-                    # Add more voice setting handlers here
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, bot.handle_voice_option),
                 ]
             },
             fallbacks=[CommandHandler('start', bot.start)]
@@ -1077,6 +1380,7 @@ def run_bot():
         print("🤖 Islamic Reels Bot Pro Starting...")
         print("✅ Bot is running with advanced features!")
         print("🚀 Ready for bulk video creation...")
+        print("📝 Quotes are now properly separated by blank lines!")
         
         application.run_polling(drop_pending_updates=True)
         
@@ -1108,6 +1412,7 @@ if __name__ == '__main__':
     print("🎥 Real Video Reels with Voiceovers")
     print("🌍 Multi-language Support")
     print("⚡ Fast Bulk Processing")
+    print("📝 Smart Quote Separation by Blank Lines")
     print("=" * 60)
     
     main()
