@@ -9,3 +9,8 @@ pyttsx3==2.90
 requests==2.31.0
 moviepy
 numpy
+decorator
+imageio
+imageio-ffmpeg
+tqdm
+proglog
