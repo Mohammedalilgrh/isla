@@ -7,3 +7,5 @@ gunicorn
 python-bidi==0.4.2
 pyttsx3==2.90
 requests==2.31.0
+moviepy
+numpy
