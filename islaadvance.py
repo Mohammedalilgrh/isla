@@ -1,5 +1,6 @@
 from keep_alive import keep_alive
 import requests
+import time  # Added this import
 
 # Start keep-alive server BEFORE starting the bot
 keep_alive()
@@ -8,6 +9,7 @@ keep_alive()
 def self_ping():
     """Ping ourselves to stay awake"""
     try:
+        # Use a placeholder URL - replace with your actual Render URL
         requests.get("https://your-bot-name.onrender.com/", timeout=10)
         print(f"✅ Self-ping at {time.strftime('%Y-%m-%d %H:%M:%S')}")
     except Exception as e:
@@ -35,14 +37,21 @@ import arabic_reshaper
 from bidi.algorithm import get_display
 import requests
 import time
-import moviepy.editor as mp
 import numpy as np
-from moviepy.video.io.VideoFileClip import VideoFileClip
-from moviepy.audio.io.AudioFileClip import AudioFileClip
-from moviepy.video.compositing.concatenate import concatenate_videoclips
-from moviepy.video.fx.all import resize, fadein, fadeout
 import threading
 import concurrent.futures
+
+# Try to import moviepy, handle gracefully if not available
+try:
+    import moviepy.editor as mp
+    from moviepy.video.io.VideoFileClip import VideoFileClip
+    from moviepy.audio.io.AudioFileClip import AudioFileClip
+    from moviepy.video.compositing.concatenate import concatenate_videoclips
+    from moviepy.video.fx.all import resize, fadein, fadeout
+    MOVIEPY_AVAILABLE = True
+except ImportError:
+    print("⚠️ moviepy not available - using image mode only")
+    MOVIEPY_AVAILABLE = False
 
 # Set up logging
 logging.basicConfig(
@@ -62,7 +71,8 @@ class IslamicReelsBot:
         self.user_sessions = {}
         self.processing_flags = {}  # To track and stop processing
         self.setup_fonts()
-        self.setup_background_music()
+        if MOVIEPY_AVAILABLE:
+            self.setup_background_music()
     
     def setup_fonts(self):
         """Setup Arabic and English fonts"""
@@ -551,6 +561,10 @@ Use the buttons below to get started! 🚀
     def create_video_reel(self, media_path, quote, duration=5, style='default', add_music=True, text_animation='fade'):
         """Create a real video reel with quote"""
         try:
+            if not MOVIEPY_AVAILABLE:
+                # Fallback to image creation if moviepy is not available
+                return self.create_image_with_quote(media_path, quote)
+            
             # Create a temporary directory for processing
             temp_dir = tempfile.mkdtemp()
             
@@ -649,7 +663,8 @@ Use the buttons below to get started! 🚀
             
         except Exception as e:
             logger.error(f"Error creating video reel: {e}")
-            return None
+            # Fallback to image creation if video creation fails
+            return self.create_image_with_quote(media_path, quote)
     
     def create_image_with_quote(self, image_path, quote):
         """Create beautiful image with quote (fallback)"""
@@ -774,7 +789,7 @@ Use the buttons below to get started! 🚀
         bulk_mode = session.get('bulk_mode', False)
         
         # Create reels
-        if bulk_mode:
+        if bulk_mode and MOVIEPY_AVAILABLE:
             # Bulk processing using threads
             with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
                 futures = []
@@ -1111,6 +1126,10 @@ if __name__ == '__main__':
     print("🛑 Stop Process Feature")
     print("⚡ Bulk Processing")
     print("🎨 Advanced Styling")
+    if MOVIEPY_AVAILABLE:
+        print("✅ Video Processing Available")
+    else:
+        print("⚠️ Video Processing Not Available (using image mode)")
     print("=" * 50)
     
     main()
