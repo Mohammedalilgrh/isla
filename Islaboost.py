@@ -15,6 +15,7 @@ def self_ping():
 
 # Start self-pinging in background
 import threading
+import time
 def start_self_ping():
     while True:
         self_ping()
@@ -57,6 +58,7 @@ class IslamicReelsBot:
     def __init__(self):
         self.user_sessions = {}
         self.processing_flags = {}  # To track and stop processing
+        self.VIDEO_DURATION = 17  # Set to 17 seconds for all videos
         self.setup_fonts()
         self.download_background_music()  # Download default nasheed
     
@@ -143,7 +145,7 @@ class IslamicReelsBot:
 4️⃣ *Save* - Save directly to your device
 
 ✨ *New Advanced Features:*
-• Create REAL VIDEO REELS 🎥
+• Create 17-Second Video Reels 🎥
 • Bulk generation in seconds
 • Elegant Arabic text animation
 • Soothing background nasheeds
@@ -574,7 +576,7 @@ Use the buttons below to get started! 🚀
         return MAIN_MENU
     
     async def handle_make_image_reels(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Create image reels (static images with quotes)"""
+        """Create 17-second image reels (video from images with quotes)"""
         user_id = update.effective_user.id
         
         if user_id not in self.user_sessions:
@@ -599,7 +601,7 @@ Use the buttons below to get started! 🚀
         session['processed_images'] = []
         self.processing_flags[user_id] = True
         
-        processing_msg = await update.message.reply_text("🔄 *Starting to create your image reels...*", parse_mode='Markdown')
+        processing_msg = await update.message.reply_text("🎬 *Creating 17-second video reels from images...*", parse_mode='Markdown')
         
         total_combinations = len(all_media) * len(quotes)
         created = 0
@@ -613,15 +615,13 @@ Use the buttons below to get started! 🚀
                 
                 try:
                     current_index = created + 1
-                    progress = f"🔄 Creating image {current_index}/{total_combinations}..."
+                    progress = f"🎬 Creating video {current_index}/{total_combinations} (17 seconds each)..."
                     await processing_msg.edit_text(progress)
                     
                     media_path = media['file_path']
                     
-                    if media['type'] == 'image':
-                        result_path = self.create_image_with_quote(media_path, quote)
-                    else:  # video
-                        result_path = self.create_video_thumbnail(media_path, quote)
+                    # Create 17-second video from image
+                    result_path = await self.create_image_video_reel(media_path, quote)
                     
                     if result_path and os.path.exists(result_path):
                         session['processed_images'].append({
@@ -630,7 +630,7 @@ Use the buttons below to get started! 🚀
                             'media_index': media_index,
                             'quote_index': quote_index,
                             'index': created,
-                            'type': media['type']
+                            'type': 'video'  # Now all are videos
                         })
                         created += 1
                         
@@ -645,9 +645,9 @@ Use the buttons below to get started! 🚀
         if user_id in self.processing_flags:
             del self.processing_flags[user_id]
         
-        # Send all created image reels with save buttons
+        # Send all created video reels with save buttons
         if created > 0:
-            await processing_msg.edit_text(f"✅ *Created {created} image reels! Sending them now...*", parse_mode='Markdown')
+            await processing_msg.edit_text(f"✅ *Created {created} video reels! Sending them now...*", parse_mode='Markdown')
             
             for i, media_data in enumerate(session['processed_images']):
                 try:
@@ -656,44 +656,45 @@ Use the buttons below to get started! 🚀
                         
                     if os.path.exists(media_data['media_path']):
                         with open(media_data['media_path'], 'rb') as f:
-                            caption = f"**Image Reel {i+1}**\n{media_data['quote']}"
+                            caption = f"**Video Reel {i+1} (17 seconds)**\n{media_data['quote']}"
                             
                             if len(all_media) == 1 and len(quotes) > 1:
                                 caption += f"\n\n📝 Quote {media_data['quote_index'] + 1}"
                             
-                            await update.message.reply_photo(
-                                photo=f,
+                            await update.message.reply_video(
+                                video=f,
                                 caption=caption,
-                                reply_markup=self.get_save_keyboard(i, is_video=False),
-                                parse_mode='Markdown'
+                                reply_markup=self.get_save_keyboard(i, is_video=True),
+                                parse_mode='Markdown',
+                                duration=self.VIDEO_DURATION
                             )
                         await asyncio.sleep(1)  # Rate limiting
                         
                 except Exception as e:
-                    logger.error(f"Error sending image reel {i}: {e}")
+                    logger.error(f"Error sending video reel {i}: {e}")
                     continue
             
             await update.message.reply_text(
-                f"🎉 *Successfully Created {created} Image Reels!*\n\n"
+                f"🎉 *Successfully Created {created} Video Reels!*\n\n"
                 f"📊 *Summary:*\n"
                 f"📷 Photos: {len(photos)}\n"
                 f"🎥 Videos: {len(videos)}\n"
                 f"📝 Quotes: {len(quotes)}\n"
-                f"🖼️ Created: {created} image reels\n\n"
-                f"💾 *Click the 'Save' button under each image to download it directly to your device!*",
+                f"🎬 Created: {created} video reels (17 seconds each)\n\n"
+                f"💾 *Click the 'Save' button under each video to download it directly to your device!*",
                 reply_markup=self.get_main_keyboard(),
                 parse_mode='Markdown'
             )
         else:
             await processing_msg.edit_text(
-                "❌ No image reels were created. Please try again with different media or quotes.",
+                "❌ No video reels were created. Please try again with different media or quotes.",
                 reply_markup=self.get_main_keyboard()
             )
         
         return MAIN_MENU
     
     async def handle_make_video_reels(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Create REAL video reels with transitions, text animations, and background music"""
+        """Create REAL 17-second video reels with transitions, text animations, and background music"""
         user_id = update.effective_user.id
         
         if user_id not in self.user_sessions:
@@ -718,7 +719,7 @@ Use the buttons below to get started! 🚀
         session['processed_videos'] = []
         self.processing_flags[user_id] = True
         
-        processing_msg = await update.message.reply_text("🎥 *Starting to create your REAL video reels...*", parse_mode='Markdown')
+        processing_msg = await update.message.reply_text("🎥 *Creating 17-second video reels...*", parse_mode='Markdown')
         
         total_combinations = len(all_media) * len(quotes)
         created = 0
@@ -732,7 +733,7 @@ Use the buttons below to get started! 🚀
                 
                 try:
                     current_index = created + 1
-                    progress = f"🎥 Creating video reel {current_index}/{total_combinations}..."
+                    progress = f"🎥 Creating video reel {current_index}/{total_combinations} (17 seconds)..."
                     await processing_msg.edit_text(progress)
                     
                     media_path = media['file_path']
@@ -773,7 +774,7 @@ Use the buttons below to get started! 🚀
                         
                     if os.path.exists(media_data['media_path']):
                         with open(media_data['media_path'], 'rb') as f:
-                            caption = f"**Video Reel {i+1}**\n{media_data['quote']}"
+                            caption = f"**Video Reel {i+1} (17 seconds)**\n{media_data['quote']}"
                             
                             if len(all_media) == 1 and len(quotes) > 1:
                                 caption += f"\n\n📝 Quote {media_data['quote_index'] + 1}"
@@ -782,7 +783,8 @@ Use the buttons below to get started! 🚀
                                 video=f,
                                 caption=caption,
                                 reply_markup=self.get_save_keyboard(i, is_video=True),
-                                parse_mode='Markdown'
+                                parse_mode='Markdown',
+                                duration=self.VIDEO_DURATION
                             )
                         await asyncio.sleep(1)  # Rate limiting
                         
@@ -796,7 +798,7 @@ Use the buttons below to get started! 🚀
                 f"📷 Photos: {len(photos)}\n"
                 f"🎥 Videos: {len(videos)}\n"
                 f"📝 Quotes: {len(quotes)}\n"
-                f"🎬 Created: {created} video reels\n\n"
+                f"🎬 Created: {created} video reels (17 seconds each)\n\n"
                 f"💾 *Click the 'Save' button under each video to download it directly to your device!*",
                 reply_markup=self.get_main_keyboard(),
                 parse_mode='Markdown'
@@ -809,37 +811,42 @@ Use the buttons below to get started! 🚀
         
         return MAIN_MENU
     
-    async def create_video_reel(self, media_path, quote, media_type):
-        """Create a single video reel with smooth transitions, text animation, and background music"""
+    async def create_image_video_reel(self, image_path, quote):
+        """Create a 17-second video from an image with animated text and background music"""
         try:
             # Define video parameters
             width, height = 1080, 1350
-            duration = 5  # Each clip will be 5 seconds
+            duration = self.VIDEO_DURATION  # 17 seconds
             
-            # Load media
-            if media_type == 'image':
-                # Create a video clip from the image
-                img_clip = mp.ImageClip(media_path).set_duration(duration)
-                # Add zoom effect
-                zoom_clip = img_clip.resize(lambda t: 1 + 0.01*t).set_position(('center', 'center'))
-                final_clip = zoom_clip
-            else:  # video
-                # Load video clip
-                video_clip = mp.VideoFileClip(media_path)
-                # Trim to 5 seconds if longer
-                if video_clip.duration > duration:
-                    video_clip = video_clip.subclip(0, duration)
-                # Resize to fit
-                video_clip = video_clip.resize((width, height))
-                final_clip = video_clip
+            # Load and prepare image
+            img = Image.open(image_path)
+            img = img.convert('RGB')
             
-            # Create text clip with animation
+            # Create a temporary image file
+            temp_img_path = tempfile.mktemp(suffix='_temp.jpg')
+            img.save(temp_img_path, quality=95)
+            
+            # Create video clip from image with zoom/pan effect
+            img_clip = mp.ImageClip(temp_img_path, duration=duration)
+            
+            # Add smooth zoom effect (zooming in from 1.0 to 1.15 over 17 seconds)
+            zoom_factor = lambda t: 1.0 + 0.15 * (t / duration)  # Slow zoom from 1.0 to 1.15
+            zoom_clip = img_clip.resize(zoom_factor).set_position(('center', 'center'))
+            
+            # Add subtle horizontal pan for more dynamism
+            def pan_position(t):
+                x_offset = np.sin(t * 0.3) * 20  # Gentle side-to-side movement
+                return ('center', 'center')
+            
+            final_clip = zoom_clip.set_position(pan_position)
+            
+            # Create animated text
             is_arabic = self.is_arabic_text(quote)
             font_path = self.get_font_path(is_arabic)
-            font_size = 60 if is_arabic else 50
+            font_size = 70 if is_arabic else 60
             color = 'white'
             stroke_color = 'black'
-            stroke_width = 2
+            stroke_width = 3
             
             # Process Arabic text
             if is_arabic:
@@ -847,24 +854,32 @@ Use the buttons below to get started! 🚀
             else:
                 display_text = quote
             
-            # Create text clip with fade-in/fade-out
-            text_clip = TextClip(display_text, fontsize=font_size, font=font_path if font_path else 'Arial',
+            # Split text into lines that fit
+            text_lines = self.split_text_to_lines(quote, font_size, width * 0.8, is_arabic)
+            text_block = '\n'.join(text_lines)
+            
+            # Create text clip
+            text_clip = TextClip(text_block, fontsize=font_size, font=font_path if font_path else 'Arial',
                                color=color, stroke_color=stroke_color, stroke_width=stroke_width,
-                               method='caption', size=(width * 0.8, None)).set_duration(duration)
+                               method='caption', size=(width * 0.9, None), align='center').set_duration(duration)
             
             # Position text at center
             text_clip = text_clip.set_position(('center', 'center')).set_start(0)
             
-            # Add subtle animation: slight scale up and down
-            def scale_func(t):
-                base_scale = 1.0
-                oscillation = 0.02 * np.sin(2 * np.pi * t / 5)  # Oscillate every 5 seconds
-                return base_scale + oscillation
-            
-            text_clip = text_clip.resize(scale_func)
-            
             # Add fade-in and fade-out to text
-            text_clip = text_clip.fadein(1).fadeout(1)
+            text_clip = text_clip.fadein(2).fadeout(2)
+            
+            # Add subtle animation: slight opacity change
+            def opacity_func(t):
+                # More visible during middle, fade slightly at start/end
+                if t < 2:
+                    return t / 2  # Fade in
+                elif t > duration - 2:
+                    return (duration - t) / 2  # Fade out
+                else:
+                    return 0.95 + 0.05 * np.sin(t * 0.5)  # Subtle pulse
+            
+            text_clip = text_clip.set_opacity(opacity_func)
             
             # Composite video with text
             final_video = CompositeVideoClip([final_clip, text_clip]).set_duration(duration)
@@ -882,19 +897,152 @@ Use the buttons below to get started! 🚀
                     logger.warning(f"Could not add background music: {e}")
             
             # Create output path
+            output_path = tempfile.mktemp(suffix='_image_reel.mp4')
+            
+            # Write video file with optimized settings
+            final_video.write_videofile(
+                output_path, 
+                fps=30, 
+                codec='libx264', 
+                audio_codec='aac',
+                preset='medium', 
+                threads=4, 
+                ffmpeg_params=['-profile:v', 'baseline', '-level', '3.0'],
+                logger=None
+            )
+            
+            # Clean up temporary files
+            final_video.close()
+            img_clip.close()
+            text_clip.close()
+            if os.path.exists(temp_img_path):
+                os.unlink(temp_img_path)
+            
+            return output_path
+            
+        except Exception as e:
+            logger.error(f"Error creating image video reel: {e}")
+            # Clean up on error
+            if 'temp_img_path' in locals() and os.path.exists(temp_img_path):
+                os.unlink(temp_img_path)
+            return None
+    
+    async def create_video_reel(self, media_path, quote, media_type):
+        """Create a 17-second video reel with smooth transitions, text animation, and background music"""
+        try:
+            # Define video parameters
+            width, height = 1080, 1350
+            duration = self.VIDEO_DURATION  # 17 seconds
+            
+            # Load media
+            if media_type == 'image':
+                # Create a 17-second video clip from the image with effects
+                return await self.create_image_video_reel(media_path, quote)
+            else:  # video
+                # Load video clip
+                video_clip = mp.VideoFileClip(media_path)
+                
+                # If video is shorter than 17 seconds, loop it
+                if video_clip.duration < duration:
+                    # Loop the video to reach 17 seconds
+                    loops_needed = int(np.ceil(duration / video_clip.duration))
+                    clips = [video_clip] * loops_needed
+                    video_clip = concatenate_videoclips(clips, method="compose")
+                    video_clip = video_clip.subclip(0, duration)
+                else:
+                    # Trim to exactly 17 seconds
+                    video_clip = video_clip.subclip(0, duration)
+                
+                # Resize to fit
+                video_clip = video_clip.resize((width, height))
+                final_clip = video_clip
+            
+            # Create animated text
+            is_arabic = self.is_arabic_text(quote)
+            font_path = self.get_font_path(is_arabic)
+            font_size = 70 if is_arabic else 60
+            color = 'white'
+            stroke_color = 'black'
+            stroke_width = 3
+            
+            # Process Arabic text
+            if is_arabic:
+                display_text = self.process_arabic_text(quote)
+            else:
+                display_text = quote
+            
+            # Split text into lines that fit
+            text_lines = self.split_text_to_lines(quote, font_size, width * 0.8, is_arabic)
+            text_block = '\n'.join(text_lines)
+            
+            # Create text clip
+            text_clip = TextClip(text_block, fontsize=font_size, font=font_path if font_path else 'Arial',
+                               color=color, stroke_color=stroke_color, stroke_width=stroke_width,
+                               method='caption', size=(width * 0.9, None), align='center').set_duration(duration)
+            
+            # Position text at center
+            text_clip = text_clip.set_position(('center', 'center')).set_start(0)
+            
+            # Add fade-in and fade-out
+            text_clip = text_clip.fadein(2).fadeout(2)
+            
+            # Add subtle animation
+            def scale_func(t):
+                # Gentle breathing effect
+                base_scale = 1.0
+                pulse = 0.02 * np.sin(2 * np.pi * t / 8)  # Pulse every 8 seconds
+                return base_scale + pulse
+            
+            text_clip = text_clip.resize(scale_func)
+            
+            # Add semi-transparent background behind text for better readability
+            text_size = text_clip.size
+            bg_clip = ColorClip(size=(int(text_size[0] * 1.1), int(text_size[1] * 1.2)), 
+                              color=(0, 0, 0), duration=duration, col_opacity=0.5)
+            bg_clip = bg_clip.set_position(('center', 'center')).set_start(0)
+            bg_clip = bg_clip.fadein(2).fadeout(2)
+            
+            # Composite all elements
+            final_video = CompositeVideoClip([final_clip, bg_clip, text_clip]).set_duration(duration)
+            
+            # Add background music if available
+            nasheed_path = 'background_nasheed.mp3'
+            if os.path.exists(nasheed_path):
+                try:
+                    audio_clip = AudioFileClip(nasheed_path).subclip(0, duration)
+                    # Loop audio if shorter than video
+                    if audio_clip.duration < duration:
+                        audio_clip = audio_clip.loop(duration=duration)
+                    
+                    # Adjust audio volume to not overpower the video
+                    audio_clip = audio_clip.volumex(0.3)
+                    final_video = final_video.set_audio(audio_clip)
+                except Exception as e:
+                    logger.warning(f"Could not add background music: {e}")
+            
+            # Create output path
             output_path = tempfile.mktemp(suffix='_reel.mp4')
             
-            # Write video file
-            final_video.write_videofile(output_path, fps=24, codec='libx264', audio_codec='aac',
-                                      preset='ultrafast', threads=4, logger=None)
+            # Write video file with optimized settings
+            final_video.write_videofile(
+                output_path, 
+                fps=30, 
+                codec='libx264', 
+                audio_codec='aac',
+                preset='medium', 
+                threads=4, 
+                ffmpeg_params=['-profile:v', 'baseline', '-level', '3.0'],
+                logger=None
+            )
             
             # Close clips to free memory
             final_video.close()
             if media_type == 'image':
-                img_clip.close()
+                pass  # Already handled in create_image_video_reel
             else:
                 video_clip.close()
             text_clip.close()
+            bg_clip.close()
             
             return output_path
             
@@ -918,24 +1066,33 @@ Use the buttons below to get started! 🚀
                 
                 if user_id in self.user_sessions:
                     session = self.user_sessions[user_id]
-                    media_list = session['processed_videos'] if is_video else session['processed_images']
+                    
+                    # Check both processed images and videos (both are now videos)
+                    if is_video:
+                        media_list = session['processed_videos']
+                    else:
+                        media_list = session['processed_images']
                     
                     if 0 <= media_index < len(media_list):
                         media_data = media_list[media_index]
                         
                         if os.path.exists(media_data['media_path']):
                             with open(media_data['media_path'], 'rb') as f:
-                                if is_video:
+                                if is_video or 'video' in media_data:
+                                    filename = f"islamic_video_reel_{media_index + 1}_17s.mp4"
+                                    caption = f"💾 Saved: Video Reel {media_index + 1} (17 seconds)\n{media_data['quote']}"
                                     await query.message.reply_document(
                                         document=f,
-                                        filename=f"islamic_video_reel_{media_index + 1}.mp4",
-                                        caption=f"💾 Saved: Video Reel {media_index + 1}\n{media_data['quote']}"
+                                        filename=filename,
+                                        caption=caption
                                     )
                                 else:
+                                    filename = f"islamic_image_reel_{media_index + 1}.jpg"
+                                    caption = f"💾 Saved: Image Reel {media_index + 1}\n{media_data['quote']}"
                                     await query.message.reply_document(
                                         document=f,
-                                        filename=f"islamic_image_reel_{media_index + 1}.jpg",
-                                        caption=f"💾 Saved: Image Reel {media_index + 1}\n{media_data['quote']}"
+                                        filename=filename,
+                                        caption=caption
                                     )
                             await query.edit_message_reply_markup(reply_markup=None)
                             return
@@ -973,21 +1130,17 @@ Use the buttons below to get started! 🚀
             try:
                 if os.path.exists(media_data['media_path']):
                     with open(media_data['media_path'], 'rb') as f:
-                        if media_data['type'] == 'image' or 'processed_images' in media_data:
-                            filename = f"islamic_reel_{i+1}.jpg"
-                            caption = f"Reel {i+1}\n{media_data['quote']}"
-                            await update.message.reply_document(document=f, filename=filename, caption=caption)
-                        else:
-                            filename = f"islamic_reel_{i+1}.mp4"
-                            caption = f"Reel {i+1}\n{media_data['quote']}"
-                            await update.message.reply_document(document=f, filename=filename, caption=caption)
+                        # All reels are now 17-second videos
+                        filename = f"islamic_reel_{i+1}_17s.mp4"
+                        caption = f"Reel {i+1} (17 seconds)\n{media_data['quote']}"
+                        await update.message.reply_document(document=f, filename=filename, caption=caption)
                     sent += 1
                     await asyncio.sleep(1)  # Rate limiting
             except Exception as e:
                 logger.error(f"Error saving reel {i}: {e}")
                 continue
         
-        await status_msg.edit_text(f"✅ *Successfully saved {sent} reels to your device!*", parse_mode='Markdown')
+        await status_msg.edit_text(f"✅ *Successfully saved {sent} video reels (17 seconds each) to your device!*", parse_mode='Markdown')
         return MAIN_MENU
     
     async def handle_reset(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1068,6 +1221,7 @@ def run_bot():
         
         print("🤖 Islamic Reels Bot Starting...")
         print("✅ Bot is running with polling!")
+        print(f"🎬 All videos will be {bot.VIDEO_DURATION} seconds long")
         print("🚀 Ready to receive messages...")
         
         application.run_polling(drop_pending_updates=True)
@@ -1098,7 +1252,7 @@ if __name__ == '__main__':
     print("🕌 Islamic Reels Bot - Lifetime Version")
     print("🌍 Supports English & Arabic")
     print("🎥 Photos & Videos")
-    print("🎞️ REAL Video Reels Generation")
+    print(f"🎞️ {IslamicReelsBot().VIDEO_DURATION}-Second Video Reels")
     print("🔊 Background Nasheeds")
     print("💾 Save Direct to Device")
     print("🛑 Stop Process Feature")
