@@ -1207,7 +1207,7 @@ Use the buttons below to get started! 🚀
             try:
                 if os.path.exists(media_data['media_path']):
                     with open(media_data['media_path'], 'rb') as f:
-                        if media_data['type'] == 'image' or 'processed_images' in media_data:
+                        if media_data['type'] == 'image' or 'processed_images' in media_
                             filename = f"islamic_reel_{i+1}.jpg"
                             caption = f"Reel {i+1}\n{media_data['quote']}"
                             await update.message.reply_document(document=f, filename=filename, caption=caption)
