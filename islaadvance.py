@@ -1,27 +1,82 @@
-from flask import Flask, request
-from threading import Thread
-import telebot
-from telebot import types
-import sqlite3
+import os
+import sys
 import time
 import logging
-from datetime import datetime
+import sqlite3
 import hashlib
-import os
+import threading
 import tempfile
-import asyncio
-import arabic_reshaper
-from bidi.algorithm import get_display
-import requests
-import yt_dlp
-import re
-from PIL import Image, ImageDraw, ImageFont
-import numpy as np
-import moviepy.editor as mp
-from moviepy.editor import concatenate_videoclips, CompositeVideoClip, TextClip, ColorClip, AudioFileClip
-import json
-import urllib.parse
 import concurrent.futures
+from datetime import datetime
+from urllib.parse import urlparse
+import json
+import re
+
+# Flask imports
+from flask import Flask, request
+
+# Install missing packages
+try:
+    import telebot
+    from telebot import types
+except ImportError:
+    print("Installing pyTelegramBotAPI...")
+    import subprocess
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "pyTelegramBotAPI"])
+    import telebot
+    from telebot import types
+
+try:
+    import arabic_reshaper
+    from bidi.algorithm import get_display
+except ImportError:
+    print("Installing arabic-reshaper and python-bidi...")
+    import subprocess
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "arabic-reshaper", "python-bidi"])
+    import arabic_reshaper
+    from bidi.algorithm import get_display
+
+try:
+    import requests
+except ImportError:
+    print("Installing requests...")
+    import subprocess
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "requests"])
+    import requests
+
+try:
+    import yt_dlp
+except ImportError:
+    print("Installing yt-dlp...")
+    import subprocess
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "yt-dlp"])
+    import yt_dlp
+
+try:
+    from PIL import Image, ImageDraw, ImageFont
+except ImportError:
+    print("Installing Pillow...")
+    import subprocess
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "Pillow"])
+    from PIL import Image, ImageDraw, ImageFont
+
+try:
+    import numpy as np
+except ImportError:
+    print("Installing numpy...")
+    import subprocess
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "numpy"])
+    import numpy as np
+
+try:
+    import moviepy.editor as mp
+    from moviepy.editor import concatenate_videoclips, CompositeVideoClip, TextClip, ColorClip, AudioFileClip
+except ImportError:
+    print("Installing moviepy...")
+    import subprocess
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "moviepy"])
+    import moviepy.editor as mp
+    from moviepy.editor import concatenate_videoclips, CompositeVideoClip, TextClip, ColorClip, AudioFileClip
 
 # ==============================
 # CONFIGURATION - إعدادات البوت
@@ -50,86 +105,112 @@ SUPPORTED_DOMAINS = [
 # Initialize Flask app
 app = Flask(__name__)
 bot = telebot.TeleBot(TOKEN)
-logging.basicConfig(level=logging.INFO)
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
 
 # ==============================
 # DATABASE SETUP - قاعدة البيانات
 # ==============================
 def init_db():
-    conn = sqlite3.connect("data.db", check_same_thread=False)
-    c = conn.cursor()
-    
-    # Users table
-    c.execute('''CREATE TABLE IF NOT EXISTS users (
-        user_id INTEGER PRIMARY KEY,
-        username TEXT,
-        full_name TEXT,
-        referral_code TEXT UNIQUE,
-        withdraw_code TEXT UNIQUE,
-        balance REAL DEFAULT 0.0,
-        total_referrals INTEGER DEFAULT 0,
-        active_referrals INTEGER DEFAULT 0,
-        has_purchased BOOLEAN DEFAULT 0,
-        user_type TEXT DEFAULT 'free',  # free, paid, agent
-        joined_date DATETIME DEFAULT CURRENT_TIMESTAMP,
-        last_active DATETIME DEFAULT CURRENT_TIMESTAMP
-    )''')
-    
-    # Referrals tracking
-    c.execute('''CREATE TABLE IF NOT EXISTS referral_logs (
-        log_id INTEGER PRIMARY KEY AUTOINCREMENT,
-        referrer_id INTEGER,
-        referred_id INTEGER UNIQUE,
-        reward_amount REAL DEFAULT 0.10,
-        status TEXT DEFAULT 'pending',
-        timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
-    )''')
-    
-    # Payment requests
-    c.execute('''CREATE TABLE IF NOT EXISTS payment_requests (
-        request_id INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id INTEGER,
-        phone_number TEXT,
-        amount REAL,
-        payment_method TEXT,
-        status TEXT DEFAULT 'pending',
-        timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
-    )''')
-    
-    # Withdrawal requests
-    c.execute('''CREATE TABLE IF NOT EXISTS withdrawal_requests (
-        request_id INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id INTEGER,
-        amount REAL,
-        method TEXT,
-        account_info TEXT,
-        status TEXT DEFAULT 'pending',
-        timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
-    )''')
-    
-    # Services usage
-    c.execute('''CREATE TABLE IF NOT EXISTS service_usage (
-        usage_id INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id INTEGER,
-        service_type TEXT,  # reels, download, etc
-        usage_count INTEGER DEFAULT 1,
-        last_used DATETIME DEFAULT CURRENT_TIMESTAMP
-    )''')
-    
-    # Agent commissions
-    c.execute('''CREATE TABLE IF NOT EXISTS agent_commissions (
-        commission_id INTEGER PRIMARY KEY AUTOINCREMENT,
-        agent_id INTEGER,
-        user_id INTEGER,
-        amount REAL,
-        description TEXT,
-        timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
-    )''')
-    
-    conn.commit()
-    return conn, c
+    """تهيئة قاعدة البيانات"""
+    try:
+        conn = sqlite3.connect("data.db", check_same_thread=False)
+        c = conn.cursor()
+        
+        # Users table
+        c.execute('''CREATE TABLE IF NOT EXISTS users (
+            user_id INTEGER PRIMARY KEY,
+            username TEXT,
+            full_name TEXT,
+            referral_code TEXT UNIQUE,
+            withdraw_code TEXT UNIQUE,
+            balance REAL DEFAULT 0.0,
+            total_referrals INTEGER DEFAULT 0,
+            active_referrals INTEGER DEFAULT 0,
+            has_purchased BOOLEAN DEFAULT 0,
+            user_type TEXT DEFAULT 'free',  # free, paid, agent
+            joined_date DATETIME DEFAULT CURRENT_TIMESTAMP,
+            last_active DATETIME DEFAULT CURRENT_TIMESTAMP
+        )''')
+        
+        # Referrals tracking
+        c.execute('''CREATE TABLE IF NOT EXISTS referral_logs (
+            log_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            referrer_id INTEGER,
+            referred_id INTEGER UNIQUE,
+            reward_amount REAL DEFAULT 0.10,
+            status TEXT DEFAULT 'pending',
+            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+        )''')
+        
+        # Payment requests
+        c.execute('''CREATE TABLE IF NOT EXISTS payment_requests (
+            request_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER,
+            phone_number TEXT,
+            amount REAL,
+            payment_method TEXT,
+            status TEXT DEFAULT 'pending',
+            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+        )''')
+        
+        # Withdrawal requests
+        c.execute('''CREATE TABLE IF NOT EXISTS withdrawal_requests (
+            request_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER,
+            amount REAL,
+            method TEXT,
+            account_info TEXT,
+            status TEXT DEFAULT 'pending',
+            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+        )''')
+        
+        # Services usage
+        c.execute('''CREATE TABLE IF NOT EXISTS service_usage (
+            usage_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER,
+            service_type TEXT,  # reels, download, etc
+            usage_count INTEGER DEFAULT 1,
+            last_used DATETIME DEFAULT CURRENT_TIMESTAMP
+        )''')
+        
+        # Agent commissions
+        c.execute('''CREATE TABLE IF NOT EXISTS agent_commissions (
+            commission_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            agent_id INTEGER,
+            user_id INTEGER,
+            amount REAL,
+            description TEXT,
+            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+        )''')
+        
+        # Download history
+        c.execute('''CREATE TABLE IF NOT EXISTS download_history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER,
+            url TEXT,
+            platform TEXT,
+            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+        )''')
+        
+        conn.commit()
+        logger.info("Database initialized successfully")
+        return conn, c
+    except Exception as e:
+        logger.error(f"Database initialization error: {e}")
+        raise
 
-conn, c = init_db()
+try:
+    conn, c = init_db()
+except Exception as e:
+    logger.error(f"Failed to initialize database: {e}")
+    conn = None
+    c = None
 
 # ==============================
 # HELPER FUNCTIONS - دوال مساعدة
@@ -146,82 +227,127 @@ def check_subscription(user_id):
     """فحص الاشتراك في القنوات"""
     try:
         for channel in CHANNELS:
-            chat_member = bot.get_chat_member(channel, user_id)
-            if chat_member.status not in ["member", "administrator", "creator"]:
+            try:
+                chat_member = bot.get_chat_member(channel, user_id)
+                if chat_member.status not in ["member", "administrator", "creator"]:
+                    return False
+            except Exception as e:
+                logger.error(f"Error checking channel {channel}: {e}")
                 return False
         return True
     except Exception as e:
-        logging.error(f"Subscription check error: {e}")
+        logger.error(f"Subscription check error: {e}")
         return False
 
 def get_user_info(user_id):
     """الحصول على معلومات المستخدم"""
-    c.execute("SELECT username, full_name, user_type, balance FROM users WHERE user_id = ?", (user_id,))
-    result = c.fetchone()
-    if result:
-        username, full_name, user_type, balance = result
-        name = f"@{username}" if username and username != "None" else full_name
-        return name, user_type, balance
-    return "مستخدم", "free", 0.0
+    try:
+        if c is None:
+            return "مستخدم", "free", 0.0
+        c.execute("SELECT username, full_name, user_type, balance FROM users WHERE user_id = ?", (user_id,))
+        result = c.fetchone()
+        if result:
+            username, full_name, user_type, balance = result
+            name = f"@{username}" if username and username != "None" else full_name
+            return name, user_type, balance
+        return "مستخدم", "free", 0.0
+    except Exception as e:
+        logger.error(f"Error getting user info: {e}")
+        return "مستخدم", "free", 0.0
 
 def update_user_activity(user_id):
     """تحديث نشاط المستخدم"""
-    c.execute("UPDATE users SET last_active = ? WHERE user_id = ?", 
-             (datetime.now().strftime("%Y-%m-%d %H:%M:%S"), user_id))
-    conn.commit()
+    try:
+        if c is None or conn is None:
+            return
+        c.execute("UPDATE users SET last_active = ? WHERE user_id = ?", 
+                 (datetime.now().strftime("%Y-%m-%d %H:%M:%S"), user_id))
+        conn.commit()
+    except Exception as e:
+        logger.error(f"Error updating user activity: {e}")
 
 def get_user_balance(user_id):
     """الحصول على رصيد المستخدم"""
-    c.execute("SELECT balance FROM users WHERE user_id = ?", (user_id,))
-    result = c.fetchone()
-    return result[0] if result else 0.0
+    try:
+        if c is None:
+            return 0.0
+        c.execute("SELECT balance FROM users WHERE user_id = ?", (user_id,))
+        result = c.fetchone()
+        return result[0] if result else 0.0
+    except Exception as e:
+        logger.error(f"Error getting user balance: {e}")
+        return 0.0
 
 def get_referral_stats(user_id):
     """الحصول على إحصائيات الإحالات"""
-    c.execute("SELECT COUNT(*) FROM referral_logs WHERE referrer_id = ?", (user_id,))
-    total_refs = c.fetchone()[0]
-    c.execute("SELECT COUNT(*) FROM referral_logs WHERE referrer_id = ? AND status = 'approved'", (user_id,))
-    active_refs = c.fetchone()[0]
-    return total_refs, active_refs
+    try:
+        if c is None:
+            return 0, 0
+        c.execute("SELECT COUNT(*) FROM referral_logs WHERE referrer_id = ?", (user_id,))
+        total_refs = c.fetchone()[0] or 0
+        c.execute("SELECT COUNT(*) FROM referral_logs WHERE referrer_id = ? AND status = 'approved'", (user_id,))
+        active_refs = c.fetchone()[0] or 0
+        return total_refs, active_refs
+    except Exception as e:
+        logger.error(f"Error getting referral stats: {e}")
+        return 0, 0
 
 def can_use_service(user_id, service_type):
     """فحص إذا كان المستخدم يمكنه استخدام الخدمة"""
-    c.execute("SELECT user_type, balance FROM users WHERE user_id = ?", (user_id,))
-    result = c.fetchone()
-    if result:
-        user_type, balance = result
-        # يمكن للجميع استخدام الخدمات الأساسية
-        if user_type in ['paid', 'agent']:
-            return True
-        elif user_type == 'free':
-            # مجاني يمكنه استخدام خدمات محدودة
-            c.execute("SELECT COUNT(*) FROM service_usage WHERE user_id = ? AND service_type = ?", 
-                     (user_id, service_type))
-            usage_count = c.fetchone()[0]
-            return usage_count < 3  # 3 استخدامات مجانية لكل خدمة
-    return False
+    try:
+        if c is None:
+            return False
+        c.execute("SELECT user_type, balance FROM users WHERE user_id = ?", (user_id,))
+        result = c.fetchone()
+        if result:
+            user_type, balance = result
+            # يمكن للجميع استخدام الخدمات الأساسية
+            if user_type in ['paid', 'agent']:
+                return True
+            elif user_type == 'free':
+                # مجاني يمكنه استخدام خدمات محدودة
+                c.execute("SELECT usage_count FROM service_usage WHERE user_id = ? AND service_type = ?", 
+                         (user_id, service_type))
+                result = c.fetchone()
+                usage_count = result[0] if result else 0
+                return usage_count < 3  # 3 استخدامات مجانية لكل خدمة
+        return False
+    except Exception as e:
+        logger.error(f"Error checking service usage: {e}")
+        return False
 
 def log_service_usage(user_id, service_type):
     """تسجيل استخدام الخدمة"""
-    c.execute("""
-        INSERT INTO service_usage (user_id, service_type) 
-        VALUES (?, ?)
-        ON CONFLICT(user_id, service_type) 
-        DO UPDATE SET usage_count = usage_count + 1, last_used = ?
-    """, (user_id, service_type, datetime.now()))
-    conn.commit()
+    try:
+        if c is None or conn is None:
+            return
+        c.execute("""
+            INSERT INTO service_usage (user_id, service_type) 
+            VALUES (?, ?)
+            ON CONFLICT(user_id, service_type) 
+            DO UPDATE SET usage_count = usage_count + 1, last_used = ?
+        """, (user_id, service_type, datetime.now()))
+        conn.commit()
+    except Exception as e:
+        logger.error(f"Error logging service usage: {e}")
 
 def get_withdraw_code(user_id):
     """الحصول على كود السحب"""
-    c.execute("SELECT withdraw_code FROM users WHERE user_id = ?", (user_id,))
-    result = c.fetchone()
-    if result and result[0]:
-        return result[0]
-    else:
-        code = generate_withdraw_code(user_id)
-        c.execute("UPDATE users SET withdraw_code = ? WHERE user_id = ?", (code, user_id))
-        conn.commit()
-        return code
+    try:
+        if c is None:
+            return generate_withdraw_code(user_id)
+        c.execute("SELECT withdraw_code FROM users WHERE user_id = ?", (user_id,))
+        result = c.fetchone()
+        if result and result[0]:
+            return result[0]
+        else:
+            code = generate_withdraw_code(user_id)
+            c.execute("UPDATE users SET withdraw_code = ? WHERE user_id = ?", (code, user_id))
+            conn.commit()
+            return code
+    except Exception as e:
+        logger.error(f"Error getting withdraw code: {e}")
+        return generate_withdraw_code(user_id)
 
 # ==============================
 # TEXTS & KEYBOARDS - النصوص ولوحات المفاتيح
@@ -285,6 +411,8 @@ def start_command(message):
         if message.from_user.last_name:
             full_name += f" {message.from_user.last_name}"
 
+        logger.info(f"Start command from user {user_id} ({username})")
+
         # Check subscription
         if not check_subscription(user_id):
             show_subscription_alert(message)
@@ -299,32 +427,39 @@ def start_command(message):
         ref_code = generate_referral_code(user_id)
         withdraw_code = generate_withdraw_code(user_id)
         
-        c.execute("""
-            INSERT OR IGNORE INTO users (user_id, username, full_name, referral_code, withdraw_code) 
-            VALUES (?, ?, ?, ?, ?)
-        """, (user_id, username, full_name, ref_code, withdraw_code))
-        
-        c.execute("""
-            UPDATE users SET 
-            username = ?, 
-            full_name = ?,
-            last_active = ?,
-            withdraw_code = COALESCE(withdraw_code, ?)
-            WHERE user_id = ?
-        """, (username, full_name, datetime.now(), withdraw_code, user_id))
-        
-        # Process referral if exists
-        if referral_code:
-            process_referral(user_id, referral_code)
-        
-        conn.commit()
+        try:
+            c.execute("""
+                INSERT OR IGNORE INTO users (user_id, username, full_name, referral_code, withdraw_code) 
+                VALUES (?, ?, ?, ?, ?)
+            """, (user_id, username, full_name, ref_code, withdraw_code))
+            
+            c.execute("""
+                UPDATE users SET 
+                username = ?, 
+                full_name = ?,
+                last_active = ?,
+                withdraw_code = COALESCE(withdraw_code, ?)
+                WHERE user_id = ?
+            """, (username, full_name, datetime.now(), withdraw_code, user_id))
+            
+            # Process referral if exists
+            if referral_code:
+                process_referral(user_id, referral_code)
+            
+            conn.commit()
+            
+        except Exception as db_error:
+            logger.error(f"Database error in start command: {db_error}")
         
         # Show welcome message
         show_welcome_message(message)
         
     except Exception as e:
-        logging.error(f"Start command error: {e}")
-        bot.send_message(message.chat.id, "❌ حدث خطأ، يرجى المحاولة لاحقاً")
+        logger.error(f"Start command error: {e}")
+        try:
+            bot.send_message(message.chat.id, "❌ حدث خطأ، يرجى المحاولة لاحقاً")
+        except:
+            pass
 
 def process_referral(user_id, referral_code):
     """معالجة الإحالة"""
@@ -375,46 +510,55 @@ def process_referral(user_id, referral_code):
                     f"💰 رصيدك الجديد: {referrer_balance:.2f}$\n\n"
                     f"استمر في نشر رابطك لكسب المزيد! 🔗"
                 )
-            except:
-                pass
+            except Exception as notify_error:
+                logger.error(f"Notification error: {notify_error}")
         
         # If referrer is an agent, add commission
         if referrer_type == 'agent':
             c.execute("INSERT INTO agent_commissions (agent_id, user_id, amount, description) VALUES (?, ?, ?, ?)",
                      (referrer_id, user_id, 0.05, f"عمولة إحالة جديدة: {user_id}"))
         
+        conn.commit()
+        
     except Exception as e:
-        logging.error(f"Referral processing error: {e}")
+        logger.error(f"Referral processing error: {e}")
 
 def show_subscription_alert(message):
     """عرض تحذير الاشتراك"""
-    markup = types.InlineKeyboardMarkup()
-    for channel in CHANNELS:
-        markup.add(types.InlineKeyboardButton(f"انضم إلى {channel}", url=f"https://t.me/{channel.strip('@')}"))
-    markup.add(types.InlineKeyboardButton("✅ تم الاشتراك", callback_data="check_sub"))
-    bot.send_message(message.chat.id, 
-                    "⚠️ **للبدء، يرجى الانضمام إلى قنواتنا:**",
-                    reply_markup=markup)
+    try:
+        markup = types.InlineKeyboardMarkup()
+        for channel in CHANNELS:
+            markup.add(types.InlineKeyboardButton(f"انضم إلى {channel}", url=f"https://t.me/{channel.strip('@')}"))
+        markup.add(types.InlineKeyboardButton("✅ تم الاشتراك", callback_data="check_sub"))
+        bot.send_message(message.chat.id, 
+                        "⚠️ **للبدء، يرجى الانضمام إلى قنواتنا:**",
+                        reply_markup=markup)
+    except Exception as e:
+        logger.error(f"Error showing subscription alert: {e}")
 
 @bot.callback_query_handler(func=lambda call: call.data == "check_sub")
 def check_subscription_callback(call):
     """فحص الاشتراك"""
-    if check_subscription(call.from_user.id):
-        bot.delete_message(call.message.chat.id, call.message.message_id)
-        show_welcome_message(call.message)
-    else:
-        bot.answer_callback_query(call.id, "❗ لم تنضم لجميع القنوات", show_alert=True)
+    try:
+        if check_subscription(call.from_user.id):
+            bot.delete_message(call.message.chat.id, call.message.message_id)
+            show_welcome_message(call.message)
+        else:
+            bot.answer_callback_query(call.id, "❗ لم تنضم لجميع القنوات", show_alert=True)
+    except Exception as e:
+        logger.error(f"Error in subscription callback: {e}")
 
 def show_welcome_message(message):
     """عرض رسالة الترحيب"""
-    user_id = message.from_user.id
-    update_user_activity(user_id)
-    
-    user_info = get_user_info(user_id)
-    name, user_type, balance = user_info
-    total_refs, active_refs = get_referral_stats(user_id)
-    
-    welcome_text = f"""
+    try:
+        user_id = message.from_user.id
+        update_user_activity(user_id)
+        
+        user_info = get_user_info(user_id)
+        name, user_type, balance = user_info
+        total_refs, active_refs = get_referral_stats(user_id)
+        
+        welcome_text = f"""
 🚀 **أهلاً بك {name} في بوت الربح من الإنترنت!** 👋
 
 🎯 **نوع حسابك:** {'🆓 مجاني' if user_type == 'free' else '⭐ مميز' if user_type == 'paid' else '👑 وكيل'}
@@ -434,11 +578,13 @@ def show_welcome_message(message):
 📌 **شارك الرابط واكسب 0.10$ لكل إحالة!**
 
 👇 **اختر من القائمة:**
-    """
-    
-    bot.send_message(message.chat.id, welcome_text, 
-                     reply_markup=get_main_menu_markup(user_type),
-                     parse_mode='Markdown')
+        """
+        
+        bot.send_message(message.chat.id, welcome_text, 
+                         reply_markup=get_main_menu_markup(user_type),
+                         parse_mode='Markdown')
+    except Exception as e:
+        logger.error(f"Error showing welcome message: {e}")
 
 # ==============================
 # SERVICE HANDLERS - معالجات الخدمات
@@ -446,15 +592,16 @@ def show_welcome_message(message):
 @bot.message_handler(func=lambda message: message.text == "🚀 شراء اشتراك")
 def handle_purchase(message):
     """شراء اشتراك"""
-    user_id = message.from_user.id
-    user_info = get_user_info(user_id)
-    
-    if user_info[1] != 'free':
-        bot.send_message(message.chat.id, "✅ لديك اشتراك نشط بالفعل!", 
-                         reply_markup=get_main_menu_markup(user_info[1]))
-        return
-    
-    purchase_text = """
+    try:
+        user_id = message.from_user.id
+        user_info = get_user_info(user_id)
+        
+        if user_info[1] != 'free':
+            bot.send_message(message.chat.id, "✅ لديك اشتراك نشط بالفعل!", 
+                             reply_markup=get_main_menu_markup(user_info[1]))
+            return
+        
+        purchase_text = """
 💳 **شراء اشتراك مميز**
 
 🌟 **بسعر 2$ فقط تحصل على:**
@@ -471,25 +618,28 @@ def handle_purchase(message):
 3. سنقوم بالتفعيل خلال 24 ساعة
 
 👇 **اختر طريقة الدفع:**
-    """
-    
-    bot.send_message(message.chat.id, purchase_text,
-                     reply_markup=get_payment_methods_markup())
+        """
+        
+        bot.send_message(message.chat.id, purchase_text,
+                         reply_markup=get_payment_methods_markup())
+    except Exception as e:
+        logger.error(f"Error in purchase handler: {e}")
 
 @bot.message_handler(func=lambda message: message.text in ["💳 آسيا سيل", "💳 زين العراق", "💳 بطاقات ائتمان", "💳 كريبتو"])
 def handle_payment_method(message):
     """معالجة طريقة الدفع"""
-    method_text = message.text
-    method_map = {
-        "💳 آسيا سيل": "asiacell",
-        "💳 زين العراق": "zain",
-        "💳 بطاقات ائتمان": "card",
-        "💳 كريبتو": "crypto"
-    }
-    
-    method = method_map.get(method_text, "other")
-    
-    instructions = f"""
+    try:
+        method_text = message.text
+        method_map = {
+            "💳 آسيا سيل": "asiacell",
+            "💳 زين العراق": "zain",
+            "💳 بطاقات ائتمان": "card",
+            "💳 كريبتو": "crypto"
+        }
+        
+        method = method_map.get(method_text, "other")
+        
+        instructions = f"""
 📌 **تعليمات الدفع عبر {method_text}:**
 
 1. قم بتحويل 2$ إلى الرقم/الحساب المخصص
@@ -500,23 +650,26 @@ def handle_payment_method(message):
 💡 **معلومة:** بعد التأكيد، ستتمتع بجميع الميزات وتبدأ بجني 0.10$ لكل إحالة!
 
 📱 **أرسل رقم الهاتف/الحساب الذي استخدمته للدفع:**
-    """
-    
-    msg = bot.send_message(message.chat.id, instructions)
-    bot.register_next_step_handler(msg, lambda m: process_payment_info(m, method))
+        """
+        
+        msg = bot.send_message(message.chat.id, instructions)
+        bot.register_next_step_handler(msg, lambda m: process_payment_info(m, method))
+    except Exception as e:
+        logger.error(f"Error in payment method handler: {e}")
 
 def process_payment_info(message, method):
     """معالجة معلومات الدفع"""
-    user_id = message.from_user.id
-    payment_info = message.text.strip()
-    
-    # Save payment request
-    c.execute("INSERT INTO payment_requests (user_id, phone_number, amount, payment_method) VALUES (?, ?, ?, ?)",
-             (user_id, payment_info, 2.0, method))
-    
-    # Send to admin channel for approval
-    user_info = get_user_info(user_id)
-    admin_msg = f"""
+    try:
+        user_id = message.from_user.id
+        payment_info = message.text.strip()
+        
+        # Save payment request
+        c.execute("INSERT INTO payment_requests (user_id, phone_number, amount, payment_method) VALUES (?, ?, ?, ?)",
+                 (user_id, payment_info, 2.0, method))
+        
+        # Send to admin channel for approval
+        user_info = get_user_info(user_id)
+        admin_msg = f"""
 🆕 **طلب اشتراك جديد!**
 
 👤 **المستخدم:** {user_info[0]}
@@ -527,23 +680,30 @@ def process_payment_info(message, method):
 🔗 **كود الإحالة:** {generate_referral_code(user_id)}
 
 👇 **اختر الإجراء:**
-    """
-    
-    markup = types.InlineKeyboardMarkup()
-    markup.row(
-        types.InlineKeyboardButton("✅ قبول", callback_data=f"approve_{user_id}"),
-        types.InlineKeyboardButton("❌ رفض", callback_data=f"reject_{user_id}")
-    )
-    
-    bot.send_message(ORDER_CHANNEL, admin_msg, reply_markup=markup)
-    
-    # Notify user
-    bot.send_message(user_id, 
-                    "✅ **تم استلام طلبك!**\n\n"
-                    "📬 جاري مراجعة طلبك من قبل الإدارة...\n"
-                    "⏳ ستصلك رسالة تأكيد خلال 24 ساعة.\n\n"
-                    "شكراً لثقتك بنا! 🙏",
-                    reply_markup=get_main_menu_markup('free'))
+        """
+        
+        markup = types.InlineKeyboardMarkup()
+        markup.row(
+            types.InlineKeyboardButton("✅ قبول", callback_data=f"approve_{user_id}"),
+            types.InlineKeyboardButton("❌ رفض", callback_data=f"reject_{user_id}")
+        )
+        
+        try:
+            bot.send_message(ORDER_CHANNEL, admin_msg, reply_markup=markup)
+        except Exception as channel_error:
+            logger.error(f"Error sending to admin channel: {channel_error}")
+        
+        # Notify user
+        bot.send_message(user_id, 
+                        "✅ **تم استلام طلبك!**\n\n"
+                        "📬 جاري مراجعة طلبك من قبل الإدارة...\n"
+                        "⏳ ستصلك رسالة تأكيد خلال 24 ساعة.\n\n"
+                        "شكراً لثقتك بنا! 🙏",
+                        reply_markup=get_main_menu_markup('free'))
+        
+        conn.commit()
+    except Exception as e:
+        logger.error(f"Error processing payment info: {e}")
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith(("approve_", "reject_")))
 def handle_admin_decision(call):
@@ -570,7 +730,7 @@ def handle_admin_decision(call):
                                parse_mode='Markdown',
                                reply_markup=get_main_menu_markup('paid'))
             except Exception as e:
-                logging.error(f"Message sending failed: {e}")
+                logger.error(f"Message sending failed: {e}")
             
             bot.answer_callback_query(call.id, "تم قبول الطلب ✅")
         else:
@@ -582,7 +742,7 @@ def handle_admin_decision(call):
                                "إذا كنت تعتقد أن هذا خطأ، تواصل مع الدعم.",
                                reply_markup=get_main_menu_markup('free'))
             except Exception as e:
-                logging.error(f"Message sending failed: {e}")
+                logger.error(f"Message sending failed: {e}")
             
             bot.answer_callback_query(call.id, "تم رفض الطلب ❌")
         
@@ -593,7 +753,8 @@ def handle_admin_decision(call):
         
         bot.delete_message(call.message.chat.id, call.message.message_id)
     except Exception as e:
-        logging.error(f"Admin decision error: {e}")
+        logger.error(f"Admin decision error: {e}")
+        bot.answer_callback_query(call.id, "❌ حدث خطأ!")
 
 # ==============================
 # REELS MAKER - صانع الريلز الإسلامية
@@ -604,85 +765,97 @@ class IslamicReelsMaker:
     def __init__(self):
         self.user_sessions = {}
         self.VIDEO_DURATION = 17
-        
+    
     def handle_reels_request(self, message):
         """معالجة طلب صنع الريلز"""
-        user_id = message.from_user.id
-        
-        if not can_use_service(user_id, 'reels'):
+        try:
+            user_id = message.from_user.id
+            
+            if not can_use_service(user_id, 'reels'):
+                bot.send_message(user_id,
+                               "❌ **لقد استنفذت استخداماتك المجانية!**\n\n"
+                               "🚀 **اشترك الآن للحصول على استخدام غير محدود!**\n"
+                               "استخدم زر '🚀 شراء اشتراك' في القائمة الرئيسية.",
+                               reply_markup=get_main_menu_markup('free'))
+                return
+            
+            markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
+            markup.row("📤 رفع صورة", "📝 إضافة نص")
+            markup.row("🎬 إنشاء ريلز", "💾 حفظ الكل")
+            markup.row("🔙 القائمة الرئيسية")
+            
             bot.send_message(user_id,
-                           "❌ **لقد استنفذت استخداماتك المجانية!**\n\n"
-                           "🚀 **اشترك الآن للحصول على استخدام غير محدود!**\n"
-                           "استخدم زر '🚀 شراء اشتراك' في القائمة الرئيسية.",
-                           reply_markup=get_main_menu_markup('free'))
-            return
-        
-        markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
-        markup.row("📤 رفع صورة", "📝 إضافة نص")
-        markup.row("🎬 إنشاء ريلز", "💾 حفظ الكل")
-        markup.row("🔙 القائمة الرئيسية")
-        
-        bot.send_message(user_id,
-                       "🎬 **مرحباً بك في صانع الريلز الإسلامية!**\n\n"
-                       "📌 **كيفية الاستخدام:**\n"
-                       "1. ارفع صورة أو فيديو\n"
-                       "2. أضف النص الإسلامي\n"
-                       "3. أنشئ الريلز\n"
-                       "4. احفظ النتيجة\n\n"
-                       "👇 **اختر الإجراء:**",
-                       reply_markup=markup)
+                           "🎬 **مرحباً بك في صانع الريلز الإسلامية!**\n\n"
+                           "📌 **كيفية الاستخدام:**\n"
+                           "1. ارفع صورة أو فيديو\n"
+                           "2. أضف النص الإسلامي\n"
+                           "3. أنشئ الريلز\n"
+                           "4. احفظ النتيجة\n\n"
+                           "👇 **اختر الإجراء:**",
+                           reply_markup=markup)
+        except Exception as e:
+            logger.error(f"Error in reels request handler: {e}")
     
     def handle_upload_photo(self, message):
         """معالجة رفع الصور"""
-        user_id = message.from_user.id
-        
-        if user_id not in self.user_sessions:
-            self.user_sessions[user_id] = {'photos': [], 'texts': [], 'processed': []}
-        
-        bot.send_message(user_id,
-                       "📤 **ارفع صورة الآن:**\n"
-                       "يمكنك رفع عدة صور واحدة تلو الأخرى.\n"
-                       "عند الانتهاء، اضغط '📝 إضافة نص'")
+        try:
+            user_id = message.from_user.id
+            
+            if user_id not in self.user_sessions:
+                self.user_sessions[user_id] = {'photos': [], 'texts': [], 'processed': []}
+            
+            bot.send_message(user_id,
+                           "📤 **ارفع صورة الآن:**\n"
+                           "يمكنك رفع عدة صور واحدة تلو الأخرى.\n"
+                           "عند الانتهاء، اضغط '📝 إضافة نص'")
+        except Exception as e:
+            logger.error(f"Error in upload photo handler: {e}")
     
     def handle_add_text(self, message):
         """معالجة إضافة النصوص"""
-        user_id = message.from_user.id
-        
-        if user_id not in self.user_sessions or not self.user_sessions[user_id]['photos']:
+        try:
+            user_id = message.from_user.id
+            
+            if user_id not in self.user_sessions or not self.user_sessions[user_id]['photos']:
+                bot.send_message(user_id,
+                               "❌ **الرجاء رفع صورة أولاً!**",
+                               reply_markup=get_services_markup())
+                return
+            
             bot.send_message(user_id,
-                           "❌ **الرجاء رفع صورة أولاً!**",
-                           reply_markup=get_services_markup())
-            return
-        
-        bot.send_message(user_id,
-                       "📝 **أرسل النص الإسلامي الآن:**\n"
-                       "يمكنك إرسال عدة نصوص (كل نص في سطر)\n"
-                       "مثال:\n"
-                       "سُبْحَانَ اللَّهِ\n"
-                       "الْحَمْدُ لِلَّهِ\n"
-                       "اللَّهُ أَكْبَرُ")
-        
-        bot.register_next_step_handler(message, self.process_texts)
+                           "📝 **أرسل النص الإسلامي الآن:**\n"
+                           "يمكنك إرسال عدة نصوص (كل نص في سطر)\n"
+                           "مثال:\n"
+                           "سُبْحَانَ اللَّهِ\n"
+                           "الْحَمْدُ لِلَّهِ\n"
+                           "اللَّهُ أَكْبَرُ")
+            
+            bot.register_next_step_handler(message, self.process_texts)
+        except Exception as e:
+            logger.error(f"Error in add text handler: {e}")
     
     def process_texts(self, message):
         """معالجة النصوص"""
-        user_id = message.from_user.id
-        
-        if user_id not in self.user_sessions:
-            return
-        
-        texts = [t.strip() for t in message.text.split('\n') if t.strip()]
-        self.user_sessions[user_id]['texts'] = texts
-        
-        # Log service usage
-        log_service_usage(user_id, 'reels')
-        
-        bot.send_message(user_id,
-                       f"✅ **تم حفظ {len(texts)} نص!**\n\n"
-                       f"📷 الصور: {len(self.user_sessions[user_id]['photos'])}\n"
-                       f"📝 النصوص: {len(texts)}\n\n"
-                       "🎬 **اضغط 'إنشاء ريلز' لبدء الصنع!**",
-                       reply_markup=self.get_reels_markup())
+        try:
+            user_id = message.from_user.id
+            
+            if user_id not in self.user_sessions:
+                return
+            
+            texts = [t.strip() for t in message.text.split('\n') if t.strip()]
+            self.user_sessions[user_id]['texts'] = texts
+            
+            # Log service usage
+            log_service_usage(user_id, 'reels')
+            
+            bot.send_message(user_id,
+                           f"✅ **تم حفظ {len(texts)} نص!**\n\n"
+                           f"📷 الصور: {len(self.user_sessions[user_id]['photos'])}\n"
+                           f"📝 النصوص: {len(texts)}\n\n"
+                           "🎬 **اضغط 'إنشاء ريلز' لبدء الصنع!**",
+                           reply_markup=self.get_reels_markup())
+        except Exception as e:
+            logger.error(f"Error processing texts: {e}")
     
     def get_reels_markup(self):
         """لوحة صانع الريلز"""
@@ -693,23 +866,22 @@ class IslamicReelsMaker:
     
     def create_reels(self, message):
         """إنشاء الريلز"""
-        user_id = message.from_user.id
-        
-        if user_id not in self.user_sessions:
-            bot.send_message(user_id, "❌ لم تقم بتحميل أي بيانات!", reply_markup=get_services_markup())
-            return
-        
-        session = self.user_sessions[user_id]
-        
-        if not session['photos'] or not session['texts']:
-            bot.send_message(user_id, "❌ تحتاج إلى صور ونصوص!", reply_markup=get_services_markup())
-            return
-        
-        bot.send_message(user_id, "⏳ **جاري إنشاء الريلز...**\nقد يستغرق ذلك دقيقة...")
-        
-        # Create reels (simplified version - in production add actual image processing)
         try:
-            # Create sample reel
+            user_id = message.from_user.id
+            
+            if user_id not in self.user_sessions:
+                bot.send_message(user_id, "❌ لم تقم بتحميل أي بيانات!", reply_markup=get_services_markup())
+                return
+            
+            session = self.user_sessions[user_id]
+            
+            if not session['texts']:
+                bot.send_message(user_id, "❌ تحتاج إلى نصوص!", reply_markup=get_services_markup())
+                return
+            
+            bot.send_message(user_id, "⏳ **جاري إنشاء الريلز...**\nقد يستغرق ذلك دقيقة...")
+            
+            # Create a simple image with text (simplified for Render)
             temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.jpg')
             
             # Create a simple image with text
@@ -719,16 +891,38 @@ class IslamicReelsMaker:
             # Add Arabic text
             if session['texts']:
                 text = session['texts'][0]
-                arabic_text = arabic_reshaper.reshape(text)
-                bidi_text = get_display(arabic_text)
+                
+                # Try to reshape Arabic text
+                try:
+                    arabic_text = arabic_reshaper.reshape(text)
+                    bidi_text = get_display(arabic_text)
+                except:
+                    bidi_text = text
                 
                 # Try to use font
                 try:
-                    font = ImageFont.truetype("fonts/arial.ttf", 60)
-                except:
-                    font = ImageFont.load_default()
-                
-                draw.text((540, 675), bidi_text, font=font, fill=(255, 255, 255), anchor="mm")
+                    # Try different font paths
+                    font_paths = [
+                        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+                        "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+                        "arial.ttf"
+                    ]
+                    
+                    font = None
+                    for font_path in font_paths:
+                        try:
+                            font = ImageFont.truetype(font_path, 60)
+                            break
+                        except:
+                            continue
+                    
+                    if font is None:
+                        font = ImageFont.load_default()
+                        
+                    draw.text((540, 675), bidi_text, font=font, fill=(255, 255, 255), anchor="mm")
+                except Exception as font_error:
+                    logger.error(f"Font error: {font_error}")
+                    draw.text((540, 675), bidi_text, fill=(255, 255, 255), anchor="mm")
             
             img.save(temp_file.name, quality=95)
             
@@ -740,8 +934,13 @@ class IslamicReelsMaker:
                                      "💾 يمكنك حفظه أو مشاركته مباشرة!")
             
             # Clean up
-            os.unlink(temp_file.name)
+            try:
+                os.unlink(temp_file.name)
+            except:
+                pass
             
+            if 'processed' not in session:
+                session['processed'] = []
             session['processed'].append(temp_file.name)
             
             bot.send_message(user_id,
@@ -753,7 +952,7 @@ class IslamicReelsMaker:
                            reply_markup=self.get_reels_markup())
             
         except Exception as e:
-            logging.error(f"Reel creation error: {e}")
+            logger.error(f"Reel creation error: {e}")
             bot.send_message(user_id, "❌ حدث خطأ أثناء الإنشاء!", reply_markup=get_services_markup())
 
 # ==============================
@@ -768,70 +967,94 @@ class VideoDownloader:
             'outtmpl': 'downloads/%(title)s.%(ext)s',
             'quiet': True,
             'no_warnings': True,
+            'extract_flat': False,
         }
         self.downloading_users = {}
     
     def handle_download_request(self, message):
         """معالجة طلب التحميل"""
-        user_id = message.from_user.id
-        
-        if not can_use_service(user_id, 'download'):
+        try:
+            user_id = message.from_user.id
+            
+            if not can_use_service(user_id, 'download'):
+                bot.send_message(user_id,
+                               "❌ **لقد استنفذت استخداماتك المجانية!**\n\n"
+                               "🚀 **اشترك الآن للحصول على تحميل غير محدود!**\n"
+                               "استخدم زر '🚀 شراء اشتراك' في القائمة الرئيسية.",
+                               reply_markup=get_main_menu_markup('free'))
+                return
+            
+            markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
+            markup.row("📥 يوتيوب", "📥 انستغرام", "📥 تيك توك")
+            markup.row("📚 تحميل جماعي", "🔙 القائمة الرئيسية")
+            
             bot.send_message(user_id,
-                           "❌ **لقد استنفذت استخداماتك المجانية!**\n\n"
-                           "🚀 **اشترك الآن للحصول على تحميل غير محدود!**\n"
-                           "استخدم زر '🚀 شراء اشتراك' في القائمة الرئيسية.",
-                           reply_markup=get_main_menu_markup('free'))
-            return
-        
-        markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
-        markup.row("📥 يوتيوب", "📥 انستغرام", "📥 تيك توك")
-        markup.row("📚 تحميل جماعي", "🔙 القائمة الرئيسية")
-        
-        bot.send_message(user_id,
-                       "📥 **أهلاً بك في محمل الفيديوهات!**\n\n"
-                       "✨ **المدعومة:**\n"
-                       "• YouTube\n• Instagram\n• TikTok\n• Facebook\n"
-                       "• Twitter/X\n• Reddit\n• والمزيد!\n\n"
-                       "👇 **اختر المنصة أو أرسل الرابط مباشرة:**",
-                       reply_markup=markup)
+                           "📥 **أهلاً بك في محمل الفيديوهات!**\n\n"
+                           "✨ **المدعومة:**\n"
+                           "• YouTube\n• Instagram\n• TikTok\n• Facebook\n"
+                           "• Twitter/X\n• Reddit\n• والمزيد!\n\n"
+                           "👇 **اختر المنصة أو أرسل الرابط مباشرة:**",
+                           reply_markup=markup)
+        except Exception as e:
+            logger.error(f"Error in download request handler: {e}")
     
     def process_video_url(self, message):
         """معالجة رابط الفيديو"""
-        user_id = message.from_user.id
-        url = message.text.strip()
-        
-        # Check if it's a valid URL
-        if not re.match(r'https?://\S+', url):
-            bot.send_message(user_id, "❌ رابط غير صحيح!", reply_markup=get_services_markup())
-            return
-        
-        # Check if supported platform
-        supported = any(domain in url.lower() for domain in SUPPORTED_DOMAINS)
-        if not supported:
-            bot.send_message(user_id,
-                           "❌ **المنصة غير مدعومة حالياً!**\n\n"
-                           "📋 **المدعومة:**\n"
-                           "YouTube, Instagram, TikTok, Facebook,\n"
-                           "Twitter/X, Reddit, Pinterest, Vimeo",
-                           reply_markup=get_services_markup())
-            return
-        
-        # Log service usage
-        log_service_usage(user_id, 'download')
-        
-        bot.send_message(user_id, "🔍 **جاري تحليل الرابط...**")
-        
-        # Download in background
-        Thread(target=self.download_video, args=(user_id, url)).start()
+        try:
+            user_id = message.from_user.id
+            url = message.text.strip()
+            
+            # Check if it's a valid URL
+            if not re.match(r'https?://\S+', url):
+                bot.send_message(user_id, "❌ رابط غير صحيح!", reply_markup=get_services_markup())
+                return
+            
+            # Check if supported platform
+            supported = any(domain in url.lower() for domain in SUPPORTED_DOMAINS)
+            if not supported:
+                bot.send_message(user_id,
+                               "❌ **المنصة غير مدعومة حالياً!**\n\n"
+                               "📋 **المدعومة:**\n"
+                               "YouTube, Instagram, TikTok, Facebook,\n"
+                               "Twitter/X, Reddit, Pinterest, Vimeo",
+                               reply_markup=get_services_markup())
+                return
+            
+            # Log service usage
+            log_service_usage(user_id, 'download')
+            
+            bot.send_message(user_id, "🔍 **جاري تحليل الرابط...**")
+            
+            # Download in background
+            threading.Thread(target=self.download_video, args=(user_id, url), daemon=True).start()
+            
+        except Exception as e:
+            logger.error(f"Error processing video URL: {e}")
+            bot.send_message(user_id, "❌ حدث خطأ أثناء معالجة الرابط!")
     
     def download_video(self, user_id, url):
         """تحميل الفيديو"""
         try:
             self.downloading_users[user_id] = True
             
+            # Create downloads directory if it doesn't exist
+            os.makedirs(DOWNLOAD_PATH, exist_ok=True)
+            
             with yt_dlp.YoutubeDL(self.ydl_opts) as ydl:
                 info = ydl.extract_info(url, download=True)
                 filename = ydl.prepare_filename(info)
+                
+                # Check if file exists
+                if not os.path.exists(filename):
+                    # Try to find the actual downloaded file
+                    for ext in ['.mp4', '.webm', '.mkv', '.flv', '.avi']:
+                        alt_filename = filename.rsplit('.', 1)[0] + ext
+                        if os.path.exists(alt_filename):
+                            filename = alt_filename
+                            break
+                
+                if not os.path.exists(filename):
+                    raise FileNotFoundError("لم يتم العثور على الملف المحمل")
                 
                 # Check file size
                 file_size = os.path.getsize(filename)
@@ -848,23 +1071,43 @@ class VideoDownloader:
                 
                 # Send to user
                 with open(filename, 'rb') as f:
-                    bot.send_video(user_id, f,
-                                 caption=f"✅ **تم التحميل بنجاح!**\n\n"
-                                         f"🎬 **{info.get('title', 'فيديو')}**\n"
-                                         f"⏱️ المدة: {info.get('duration', 0)} ثانية\n"
-                                         f"📦 الحجم: {file_size//1024//1024}MB")
+                    try:
+                        bot.send_video(user_id, f,
+                                     caption=f"✅ **تم التحميل بنجاح!**\n\n"
+                                             f"🎬 **{info.get('title', 'فيديو')[:50]}...**\n"
+                                             f"⏱️ المدة: {info.get('duration', 0)} ثانية\n"
+                                             f"📦 الحجم: {file_size//1024//1024}MB",
+                                     supports_streaming=True)
+                    except Exception as send_error:
+                        logger.error(f"Error sending video: {send_error}")
+                        # Try sending as document if video fails
+                        with open(filename, 'rb') as f_doc:
+                            bot.send_document(user_id, f_doc,
+                                            caption=f"✅ **تم التحميل بنجاح!**\n\n"
+                                                    f"🎬 **{info.get('title', 'فيديو')[:50]}...**\n"
+                                                    f"⏱️ المدة: {info.get('duration', 0)} ثانية\n"
+                                                    f"📦 الحجم: {file_size//1024//1024}MB")
                 
                 # Clean up
-                os.remove(filename)
+                try:
+                    os.remove(filename)
+                except:
+                    pass
                 
                 # Save download history
-                c.execute("INSERT INTO download_history (user_id, url, platform) VALUES (?, ?, ?)",
-                         (user_id, url, self.get_platform(url)))
-                conn.commit()
+                try:
+                    c.execute("INSERT INTO download_history (user_id, url, platform) VALUES (?, ?, ?)",
+                             (user_id, url, self.get_platform(url)))
+                    conn.commit()
+                except Exception as db_error:
+                    logger.error(f"Database error saving history: {db_error}")
                 
         except Exception as e:
-            logging.error(f"Download error: {e}")
-            bot.send_message(user_id, f"❌ **حدث خطأ أثناء التحميل!**\n{str(e)[:100]}...")
+            logger.error(f"Download error: {e}")
+            try:
+                bot.send_message(user_id, f"❌ **حدث خطأ أثناء التحميل!**\n{str(e)[:100]}...")
+            except:
+                pass
         
         finally:
             if user_id in self.downloading_users:
@@ -938,91 +1181,102 @@ def handle_direct_url(message):
 @bot.message_handler(func=lambda message: message.text == "💰 سحب الأرباح")
 def handle_withdraw(message):
     """سحب الأرباح"""
-    user_id = message.from_user.id
-    balance = get_user_balance(user_id)
-    
-    if balance < 2.0:
+    try:
+        user_id = message.from_user.id
+        balance = get_user_balance(user_id)
+        
+        if balance < 2.0:
+            bot.send_message(user_id,
+                           f"❌ **الحد الأدنى للسحب هو 2$**\n\n"
+                           f"💰 رصيدك الحالي: {balance:.2f}$\n\n"
+                           f"📈 **لزيادة رصيدك:**\n"
+                           f"1. انشر رابط إحالتك\n"
+                           f"2. احصل على 0.10$ لكل مشترك جديد\n"
+                           f"3. استخدم الخدمات المميزة\n\n"
+                           f"🔗 **رابط إحالتك:**\n"
+                           f"`https://t.me/{bot.get_me().username}?start={generate_referral_code(user_id)}`",
+                           parse_mode='Markdown',
+                           reply_markup=get_main_menu_markup(get_user_info(user_id)[1]))
+            return
+        
+        # Generate verification code
+        withdraw_code = get_withdraw_code(user_id)
+        
         bot.send_message(user_id,
-                       f"❌ **الحد الأدنى للسحب هو 2$**\n\n"
-                       f"💰 رصيدك الحالي: {balance:.2f}$\n\n"
-                       f"📈 **لزيادة رصيدك:**\n"
-                       f"1. انشر رابط إحالتك\n"
-                       f"2. احصل على 0.10$ لكل مشترك جديد\n"
-                       f"3. استخدم الخدمات المميزة\n\n"
-                       f"🔗 **رابط إحالتك:**\n"
-                       f"`https://t.me/{bot.get_me().username}?start={generate_referral_code(user_id)}`",
+                       f"📤 **لسحب الأرباح:**\n\n"
+                       f"🔐 **كود التحقق:** `{withdraw_code}`\n\n"
+                       f"💰 **المبلغ:** {balance:.2f}$\n\n"
+                       f"📝 **أرسل كود التحقق لتأكيد السحب:**",
                        parse_mode='Markdown',
-                       reply_markup=get_main_menu_markup(get_user_info(user_id)[1]))
-        return
-    
-    # Generate verification code
-    withdraw_code = get_withdraw_code(user_id)
-    
-    bot.send_message(user_id,
-                   f"📤 **لسحب الأرباح:**\n\n"
-                   f"🔐 **كود التحقق:** `{withdraw_code}`\n\n"
-                   f"💰 **المبلغ:** {balance:.2f}$\n\n"
-                   f"📝 **أرسل كود التحقق لتأكيد السحب:**",
-                   parse_mode='Markdown',
-                   reply_markup=types.ReplyKeyboardRemove())
-    
-    bot.register_next_step_handler(message, verify_withdraw_code)
+                       reply_markup=types.ReplyKeyboardRemove())
+        
+        bot.register_next_step_handler(message, verify_withdraw_code)
+    except Exception as e:
+        logger.error(f"Error in withdraw handler: {e}")
 
 def verify_withdraw_code(message):
     """تأكيد كود السحب"""
-    user_id = message.from_user.id
-    correct_code = get_withdraw_code(user_id)
-    user_input = message.text.strip()
-    
-    if user_input == correct_code:
-        # Generate new code
-        new_code = generate_withdraw_code(user_id)
-        c.execute("UPDATE users SET withdraw_code = ? WHERE user_id = ?", (new_code, user_id))
+    try:
+        user_id = message.from_user.id
+        correct_code = get_withdraw_code(user_id)
+        user_input = message.text.strip()
         
-        bot.send_message(user_id,
-                       "✅ **تم التحقق بنجاح!**\n\n"
-                       "💰 **اختر طريقة السحب:**",
-                       reply_markup=get_withdraw_methods_markup())
-    else:
-        bot.send_message(user_id,
-                       "❌ **كود التحقق غير صحيح!**\n\n"
-                       "الرجاء المحاولة مرة أخرى.",
-                       reply_markup=get_main_menu_markup(get_user_info(user_id)[1]))
+        if user_input == correct_code:
+            # Generate new code
+            new_code = generate_withdraw_code(user_id)
+            c.execute("UPDATE users SET withdraw_code = ? WHERE user_id = ?", (new_code, user_id))
+            conn.commit()
+            
+            bot.send_message(user_id,
+                           "✅ **تم التحقق بنجاح!**\n\n"
+                           "💰 **اختر طريقة السحب:**",
+                           reply_markup=get_withdraw_methods_markup())
+        else:
+            bot.send_message(user_id,
+                           "❌ **كود التحقق غير صحيح!**\n\n"
+                           "الرجاء المحاولة مرة أخرى.",
+                           reply_markup=get_main_menu_markup(get_user_info(user_id)[1]))
+    except Exception as e:
+        logger.error(f"Error verifying withdraw code: {e}")
 
 @bot.message_handler(func=lambda message: message.text in ["💳 زين العراق", "💳 آسيا سيل", "💳 باي بال", "💳 كريبتو", "💳 ويسترن يونيون"])
 def handle_withdraw_method(message):
     """طريقة السحب"""
-    user_id = message.from_user.id
-    method = message.text.replace("💳 ", "")
-    balance = get_user_balance(user_id)
-    
-    bot.send_message(user_id,
-                   f"📤 **طريقة السحب:** {method}\n\n"
-                   f"💰 **المبلغ:** {balance:.2f}$\n\n"
-                   f"📝 **أرسل معلومات {method} (رقم هاتف/حساب):**",
-                   reply_markup=types.ReplyKeyboardRemove())
-    
-    bot.register_next_step_handler(message, lambda m: process_withdraw_details(m, method, balance))
+    try:
+        user_id = message.from_user.id
+        method = message.text.replace("💳 ", "")
+        balance = get_user_balance(user_id)
+        
+        bot.send_message(user_id,
+                       f"📤 **طريقة السحب:** {method}\n\n"
+                       f"💰 **المبلغ:** {balance:.2f}$\n\n"
+                       f"📝 **أرسل معلومات {method} (رقم هاتف/حساب):**",
+                       reply_markup=types.ReplyKeyboardRemove())
+        
+        bot.register_next_step_handler(message, lambda m: process_withdraw_details(m, method, balance))
+    except Exception as e:
+        logger.error(f"Error in withdraw method handler: {e}")
 
 def process_withdraw_details(message, method, amount):
     """معالجة تفاصيل السحب"""
-    user_id = message.from_user.id
-    account_info = message.text.strip()
-    
-    # Register withdrawal request
-    c.execute("INSERT INTO withdrawal_requests (user_id, amount, method, account_info) VALUES (?, ?, ?, ?)",
-             (user_id, amount, method, account_info))
-    
-    # Deduct from balance
-    c.execute("UPDATE users SET balance = balance - ? WHERE user_id = ?", (amount, user_id))
-    
-    # Generate new withdraw code
-    new_code = generate_withdraw_code(user_id)
-    c.execute("UPDATE users SET withdraw_code = ? WHERE user_id = ?", (new_code, user_id))
-    
-    # Send to admin
-    user_info = get_user_info(user_id)
-    admin_msg = f"""
+    try:
+        user_id = message.from_user.id
+        account_info = message.text.strip()
+        
+        # Register withdrawal request
+        c.execute("INSERT INTO withdrawal_requests (user_id, amount, method, account_info) VALUES (?, ?, ?, ?)",
+                 (user_id, amount, method, account_info))
+        
+        # Deduct from balance
+        c.execute("UPDATE users SET balance = balance - ? WHERE user_id = ?", (amount, user_id))
+        
+        # Generate new withdraw code
+        new_code = generate_withdraw_code(user_id)
+        c.execute("UPDATE users SET withdraw_code = ? WHERE user_id = ?", (new_code, user_id))
+        
+        # Send to admin
+        user_info = get_user_info(user_id)
+        admin_msg = f"""
 📌 **طلب سحب جديد!**
 
 👤 **المستخدم:** {user_info[0]}
@@ -1031,32 +1285,39 @@ def process_withdraw_details(message, method, amount):
 💳 **الطريقة:** {method}
 📱 **المعلومات:** {account_info}
 🔐 **كود التحقق:** {new_code}
-    """
-    
-    bot.send_message(ORDER_CHANNEL, admin_msg)
-    
-    # Notify user
-    bot.send_message(user_id,
-                   "✅ **تم استلام طلب السحب!**\n\n"
-                   "⏳ **جاري المعالجة خلال 24-48 ساعة**\n"
-                   "📬 **سيتم إعلامك عند الانتهاء**\n\n"
-                   "شكراً لاستخدامك خدماتنا! 🙏",
-                   reply_markup=get_main_menu_markup(get_user_info(user_id)[1]))
-    
-    conn.commit()
+        """
+        
+        try:
+            bot.send_message(ORDER_CHANNEL, admin_msg)
+        except Exception as channel_error:
+            logger.error(f"Error sending to admin channel: {channel_error}")
+        
+        # Notify user
+        bot.send_message(user_id,
+                       "✅ **تم استلام طلب السحب!**\n\n"
+                       "⏳ **جاري المعالجة خلال 24-48 ساعة**\n"
+                       "📬 **سيتم إعلامك عند الانتهاء**\n\n"
+                       "شكراً لاستخدامك خدماتنا! 🙏",
+                       reply_markup=get_main_menu_markup(get_user_info(user_id)[1]))
+        
+        conn.commit()
+    except Exception as e:
+        logger.error(f"Error processing withdraw details: {e}")
 
 @bot.message_handler(func=lambda message: message.text == "📊 إحصائياتي")
 def handle_stats(message):
     """إحصائيات المستخدم"""
-    user_id = message.from_user.id
-    user_info = get_user_info(user_id)
-    name, user_type, balance = user_info
-    total_refs, active_refs = get_referral_stats(user_id)
-    
-    c.execute("SELECT joined_date FROM users WHERE user_id = ?", (user_id,))
-    join_date = c.fetchone()[0][:10] if c.fetchone() else "غير معروف"
-    
-    stats_text = f"""
+    try:
+        user_id = message.from_user.id
+        user_info = get_user_info(user_id)
+        name, user_type, balance = user_info
+        total_refs, active_refs = get_referral_stats(user_id)
+        
+        c.execute("SELECT joined_date FROM users WHERE user_id = ?", (user_id,))
+        result = c.fetchone()
+        join_date = result[0][:10] if result else "غير معروف"
+        
+        stats_text = f"""
 📊 **إحصائيات حسابك:**
 
 👤 **الاسم:** {name}
@@ -1075,23 +1336,26 @@ def handle_stats(message):
 `https://t.me/{bot.get_me().username}?start={generate_referral_code(user_id)}`
 
 📌 **شارك الرابط واكسب 0.10$ لكل إحالة!**
-    """
-    
-    bot.send_message(user_id, stats_text, 
-                     parse_mode='Markdown',
-                     reply_markup=get_main_menu_markup(user_type))
+        """
+        
+        bot.send_message(user_id, stats_text, 
+                         parse_mode='Markdown',
+                         reply_markup=get_main_menu_markup(user_type))
+    except Exception as e:
+        logger.error(f"Error in stats handler: {e}")
 
 @bot.message_handler(func=lambda message: message.text in ["👥 الإحالات", "👥 فريق الإحالات"])
 def handle_referrals(message):
     """عرض الإحالات"""
-    user_id = message.from_user.id
-    user_info = get_user_info(user_id)
-    user_type = user_info[1]
-    
-    total_refs, active_refs = get_referral_stats(user_id)
-    earnings = active_refs * 0.10
-    
-    referrals_text = f"""
+    try:
+        user_id = message.from_user.id
+        user_info = get_user_info(user_id)
+        user_type = user_info[1]
+        
+        total_refs, active_refs = get_referral_stats(user_id)
+        earnings = active_refs * 0.10
+        
+        referrals_text = f"""
 👥 **نظام الإحالات والأرباح**
 
 💰 **سعر الإحالة:** 0.10$ لكل مشترك جديد
@@ -1114,26 +1378,29 @@ def handle_referrals(message):
 • استخدم وسوم جذابة
 
 🚀 **ابدأ الربح الآن!**
-    """
-    
-    markup = types.InlineKeyboardMarkup()
-    markup.add(types.InlineKeyboardButton("📤 مشاركة الرابط", 
-                                          url=f"https://t.me/share/url?url=https://t.me/{bot.get_me().username}?start={generate_referral_code(user_id)}&text=انضم%20إلى%20بوت%20الربح%20من%20الإنترنت%20واحصل%20على%200.10$%20لكل%20إحالة!%20🚀"))
-    
-    bot.send_message(user_id, referrals_text,
-                     parse_mode='Markdown',
-                     reply_markup=markup)
-    
-    bot.send_message(user_id,
-                     "👇 **استخدم الأزرار أدناه للعودة:**",
-                     reply_markup=get_main_menu_markup(user_type))
+        """
+        
+        markup = types.InlineKeyboardMarkup()
+        share_url = f"https://t.me/share/url?url=https://t.me/{bot.get_me().username}?start={generate_referral_code(user_id)}&text=انضم%20إلى%20بوت%20الربح%20من%20الإنترنت%20واحصل%20على%200.10$%20لكل%20إحالة!%20🚀"
+        markup.add(types.InlineKeyboardButton("📤 مشاركة الرابط", url=share_url))
+        
+        bot.send_message(user_id, referrals_text,
+                         parse_mode='Markdown',
+                         reply_markup=markup)
+        
+        bot.send_message(user_id,
+                         "👇 **استخدم الأزرار أدناه للعودة:**",
+                         reply_markup=get_main_menu_markup(user_type))
+    except Exception as e:
+        logger.error(f"Error in referrals handler: {e}")
 
 @bot.message_handler(func=lambda message: message.text == "🆓 خدمات مجانية")
 def handle_free_services(message):
     """الخدمات المجانية"""
-    user_id = message.from_user.id
-    
-    free_services_text = """
+    try:
+        user_id = message.from_user.id
+        
+        free_services_text = """
 🆓 **الخدمات المجانية المتاحة:**
 
 1️⃣ **صنع الريلز الإسلامية:**
@@ -1158,17 +1425,20 @@ def handle_free_services(message):
 • دعم فني مميز
 
 💰 **استخدم زر '🚀 شراء اشتراك'**
-    """
-    
-    bot.send_message(user_id, free_services_text,
-                     reply_markup=get_main_menu_markup(get_user_info(user_id)[1]))
+        """
+        
+        bot.send_message(user_id, free_services_text,
+                         reply_markup=get_main_menu_markup(get_user_info(user_id)[1]))
+    except Exception as e:
+        logger.error(f"Error in free services handler: {e}")
 
 @bot.message_handler(func=lambda message: message.text == "🆘 المساعدة")
 def handle_help(message):
     """المساعدة"""
-    user_id = message.from_user.id
-    
-    help_text = """
+    try:
+        user_id = message.from_user.id
+        
+        help_text = """
 🆘 **مركز المساعدة**
 
 ❓ **كيفية الاستخدام:**
@@ -1200,17 +1470,20 @@ def handle_help(message):
 
 📞 **الدعم الفني:**
 @intorders (قناة الطلبات)
-    """
-    
-    bot.send_message(user_id, help_text,
-                     reply_markup=get_main_menu_markup(get_user_info(user_id)[1]))
+        """
+        
+        bot.send_message(user_id, help_text,
+                         reply_markup=get_main_menu_markup(get_user_info(user_id)[1]))
+    except Exception as e:
+        logger.error(f"Error in help handler: {e}")
 
 @bot.message_handler(func=lambda message: message.text == "🔙 القائمة الرئيسية")
 def handle_back_to_main(message):
     """العودة للقائمة الرئيسية"""
-    user_id = message.from_user.id
-    user_info = get_user_info(user_id)
-    show_welcome_message(message)
+    try:
+        show_welcome_message(message)
+    except Exception as e:
+        logger.error(f"Error in back to main handler: {e}")
 
 # ==============================
 # FLASK ROUTES - مسارات فلاسك
@@ -1219,52 +1492,74 @@ def handle_back_to_main(message):
 def bot_webhook():
     """ويبهوك البوت"""
     try:
-        json_data = request.get_data().decode('utf-8')
-        update = types.Update.de_json(json_data)
-        bot.process_new_updates([update])
-        return "OK", 200
+        if request.headers.get('content-type') == 'application/json':
+            json_data = request.get_data().decode('utf-8')
+            update = types.Update.de_json(json_data)
+            bot.process_new_updates([update])
+            return "OK", 200
+        else:
+            return "Invalid content type", 400
     except Exception as e:
-        logging.error(f"Webhook error: {e}")
+        logger.error(f"Webhook error: {e}")
         return "Error", 500
 
 @app.route('/')
+def home():
+    """الصفحة الرئيسية"""
+    return "✅ Bot is running! - البوت يعمل بنجاح!"
+
+@app.route('/set_webhook')
 def set_webhook():
     """إعداد الويبهوك"""
     try:
         bot.remove_webhook()
         time.sleep(1)
-        webhook_url = f'https://invite2earnn-h0v1.onrender.com/{TOKEN}'
+        webhook_url = f'https://{request.host}/{TOKEN}'
+        logger.info(f"Setting webhook to: {webhook_url}")
         bot.set_webhook(url=webhook_url)
-        return "✅ Webhook setup successfully!", 200
+        return "✅ Webhook setup successfully! - تم إعداد الويبهوك بنجاح!", 200
     except Exception as e:
-        logging.error(f"Webhook setup error: {e}")
-        return "❌ Webhook setup failed", 500
+        logger.error(f"Webhook setup error: {e}")
+        return f"❌ Webhook setup failed - فشل إعداد الويبهوك: {e}", 500
+
+@app.route('/health')
+def health_check():
+    """فحص صحة التطبيق"""
+    try:
+        # Check database connection
+        if conn is not None:
+            c.execute("SELECT 1")
+            conn.commit()
+        
+        return {
+            "status": "healthy",
+            "timestamp": datetime.now().isoformat(),
+            "bot_username": bot.get_me().username if hasattr(bot, 'get_me') else "unknown"
+        }, 200
+    except Exception as e:
+        logger.error(f"Health check error: {e}")
+        return {"status": "unhealthy", "error": str(e)}, 500
 
 # ==============================
 # KEEP ALIVE - إبقاء البوت نشط
 # ==============================
-import threading
-
 def keep_alive():
     """إبقاء البوت نشط"""
     while True:
         try:
-            requests.get(f'https://invite2earnn-h0v1.onrender.com/')
-            print(f"✅ Ping at {time.strftime('%Y-%m-%d %H:%M:%S')}")
+            # Ping the health endpoint
+            requests.get(f'https://{app.config.get("SERVER_NAME", "localhost")}/health', timeout=10)
+            logger.info(f"✅ Health check at {time.strftime('%Y-%m-%d %H:%M:%S')}")
         except Exception as e:
-            print(f"⚠️ Ping failed: {e}")
+            logger.warning(f"⚠️ Health check failed: {e}")
         time.sleep(300)  # كل 5 دقائق
 
 # ==============================
 # MAIN - التشغيل الرئيسي
 # ==============================
 if __name__ == '__main__':
-    # إنشاء مجلد التحميلات
+    # إنشاء المجلدات المطلوبة
     os.makedirs(DOWNLOAD_PATH, exist_ok=True)
-    
-    # بدء إبقاء البوت نشط
-    ping_thread = threading.Thread(target=keep_alive, daemon=True)
-    ping_thread.start()
     
     print("=" * 50)
     print("🚀 **بوت الربح من الإنترنت يعمل الآن!**")
@@ -1275,15 +1570,20 @@ if __name__ == '__main__':
     print("=" * 50)
     
     try:
-        # تشغيل البوت
-        bot.remove_webhook()
-        time.sleep(1)
-        webhook_url = f'https://invite2earnn-h0v1.onrender.com/{TOKEN}'
-        bot.set_webhook(url=webhook_url)
+        # بدء إبقاء البوت نشط في خيط منفصل
+        ping_thread = threading.Thread(target=keep_alive, daemon=True)
+        ping_thread.start()
+        
+        # Get bot info
+        bot_info = bot.get_me()
+        print(f"🤖 Bot Username: @{bot_info.username}")
+        print(f"🆔 Bot ID: {bot_info.id}")
+        print(f"📝 Bot Name: {bot_info.first_name}")
         
         # تشغيل تطبيق فلاسك
-        app.run(host="0.0.0.0", port=5000, debug=False)
+        port = int(os.environ.get('PORT', 5000))
+        app.run(host="0.0.0.0", port=port, debug=False)
         
     except Exception as e:
-        logging.error(f"Main error: {e}")
+        logger.error(f"Main error: {e}")
         print(f"❌ Error: {e}")
