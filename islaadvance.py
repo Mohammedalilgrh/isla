@@ -49,7 +49,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Bot Configuration
-BOT_TOKEN = "8422015788:AAF2HozDLDeDVMXD0HLwCa0LGWIcdK6S2p0"
+BOT_TOKEN ="8422015788:AAF2HozDLDeDVMXD0HLwCa0LGWIcdK6S2p0"
 
 # Conversation states
 MAIN_MENU, UPLOADING_MEDIA, ADDING_QUOTES, SELECTING_REEL_TYPE = range(4)
