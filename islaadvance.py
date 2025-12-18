@@ -15,7 +15,6 @@ def self_ping():
 
 # Start self-pinging in background
 import threading
-import time
 def start_self_ping():
     while True:
         self_ping()
@@ -36,10 +35,6 @@ import arabic_reshaper
 from bidi.algorithm import get_display
 import requests
 import time
-import moviepy.editor as mp
-from moviepy.editor import concatenate_videoclips, CompositeVideoClip, TextClip, ColorClip, AudioFileClip, concatenate_audioclips
-import numpy as np
-import random
 
 # Set up logging
 logging.basicConfig(
@@ -49,18 +44,16 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Bot Configuration
-BOT_TOKEN ="8422015788:AAF2HozDLDeDVMXD0HLwCa0LGWIcdK6S2p0"
+BOT_TOKEN = "8422015788:AAF2HozDLDeDVMXD0HLwCa0LGWIcdK6S2p0"
 
 # Conversation states
-MAIN_MENU, UPLOADING_MEDIA, ADDING_QUOTES, SELECTING_REEL_TYPE = range(4)
+MAIN_MENU, UPLOADING_MEDIA, ADDING_QUOTES = range(3)
 
 class IslamicReelsBot:
     def __init__(self):
         self.user_sessions = {}
         self.processing_flags = {}  # To track and stop processing
-        self.VIDEO_DURATION = 17  # Set to 17 seconds for all videos
         self.setup_fonts()
-        self.download_background_music()  # Download default nasheed
     
     def setup_fonts(self):
         """Setup Arabic and English fonts"""
@@ -90,34 +83,19 @@ class IslamicReelsBot:
                 except Exception as e:
                     logger.error(f"Failed to download {name} font: {e}")
     
-    def download_background_music(self):
-        """Download a default soothing nasheed for video reels"""
-        nasheed_url = "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3"  # Replace with actual Islamic nasheed URL
-        nasheed_path = 'background_nasheed.mp3'
-        if not os.path.exists(nasheed_path):
-            try:
-                response = requests.get(nasheed_url, timeout=30)
-                if response.status_code == 200:
-                    with open(nasheed_path, 'wb') as f:
-                        f.write(response.content)
-                    logger.info("Downloaded background nasheed")
-            except Exception as e:
-                logger.error(f"Failed to download background music: {e}")
-    
     def get_main_keyboard(self):
         """Create main menu buttons"""
         keyboard = [
             [KeyboardButton("📤 Upload Media"), KeyboardButton("📝 Add Quotes")],
-            [KeyboardButton("🎬 Make Image Reels"), KeyboardButton("🎥 Make Video Reels")],
-            [KeyboardButton("💾 Save All"), KeyboardButton("🛑 Stop Process")],
-            [KeyboardButton("🔄 Reset")]
+            [KeyboardButton("🎬 Make Reels"), KeyboardButton("💾 Save All")],
+            [KeyboardButton("🛑 Stop Process"), KeyboardButton("🔄 Reset")]
         ]
         return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
     
-    def get_save_keyboard(self, media_index, is_video=False):
+    def get_save_keyboard(self, media_index):
         """Create save button for each reel"""
         keyboard = [
-            [InlineKeyboardButton("💾 Save This Reel", callback_data=f"save_{media_index}_{'video' if is_video else 'image'}")]
+            [InlineKeyboardButton("💾 Save This Reel", callback_data=f"save_{media_index}")]
         ]
         return InlineKeyboardMarkup(keyboard)
     
@@ -130,8 +108,7 @@ class IslamicReelsBot:
             'photos': [],
             'videos': [],
             'quotes': [],
-            'processed_images': [],  # For image reels
-            'processed_videos': []   # For video reels
+            'processed_media': []
         }
         
         welcome_text = """
@@ -141,15 +118,13 @@ class IslamicReelsBot:
 
 1️⃣ *Upload Media* - Send your images or short videos
 2️⃣ *Add Quotes* - Write your custom quotes  
-3️⃣ *Make Reels* - Choose between Image or Video Reels!
+3️⃣ *Make Reels* - Create beautiful reels with quotes
 4️⃣ *Save* - Save directly to your device
 
-✨ *New Advanced Features:*
-• Create 17-Second Video Reels 🎥
-• Bulk generation in seconds
-• Elegant Arabic text animation
-• Soothing background nasheeds
+✨ *New Features:*
+• Supports English & Arabic 🌍
 • Stop processing anytime 🛑
+• Save individual reels 💾
 
 *يدعم اللغة العربية والحركات*
 *Supports Arabic with Harakat*
@@ -158,8 +133,7 @@ class IslamicReelsBot:
 📷 Photos: 0
 🎥 Videos: 0  
 📝 Quotes: 0
-🖼️ Image Reels: 0
-🎬 Video Reels: 0
+🎬 Ready: 0
 
 Use the buttons below to get started! 🚀
         """
@@ -314,7 +288,7 @@ Use the buttons below to get started! 🚀
             f"• English and other languages\n\n"
             f"📚 *Examples:*\n"
             f"*Arabic:*\n"
-            f"رَّبِّ أَدْخِلْنِي مُدْخَلَ صِدْقٍ\nوَأَخْرِجْنِي مُخْرَجَ صِدْقٍ\n\n"
+            f"رَّبِّ أَدْخِلْنِي مُدْخَلَ صِدْقٍ\nوَأَخْرِجْنِي مُخْرَجَ صِدْقٍ\n\n"
             f"*English:*\n"
             f"O my Lord! Let my entry be good\nAnd likewise my exit be good",
             parse_mode='Markdown',
@@ -354,7 +328,7 @@ Use the buttons below to get started! 🚀
             f"🎥 Videos: {video_count}\n"
             f"📝 Quotes: {len(quotes_list)}\n\n"
             f"🎬 *Possible Combinations:* {total_media} × {len(quotes_list)} = {total_media * len(quotes_list)} reels!\n\n"
-            f"Click '🎬 Make Image Reels' or '🎥 Make Video Reels' to create your content!",
+            f"Click '🎬 Make Reels' to create your content!",
             reply_markup=self.get_main_keyboard(),
             parse_mode='Markdown'
         )
@@ -365,8 +339,8 @@ Use the buttons below to get started! 🚀
         arabic_range = range(0x0600, 0x06FF)
         return any(ord(char) in arabic_range for char in text)
     
-    def get_font_path(self, is_arabic=False):
-        """Get appropriate font path based on language"""
+    def get_font(self, size, is_arabic=False):
+        """Get appropriate font based on language"""
         font_paths = [
             'fonts/amiri.ttf' if is_arabic else 'fonts/arial.ttf',
             'fonts/noto.ttf' if is_arabic else 'fonts/arial.ttf',
@@ -374,10 +348,13 @@ Use the buttons below to get started! 🚀
         ]
         
         for font_path in font_paths:
-            if os.path.exists(font_path):
-                return font_path
+            try:
+                if os.path.exists(font_path):
+                    return ImageFont.truetype(font_path, size)
+            except:
+                continue
         
-        return None  # Will fall back to default
+        return ImageFont.load_default()
     
     def process_arabic_text(self, text):
         """Process Arabic text with proper reshaping"""
@@ -390,14 +367,8 @@ Use the buttons below to get started! 🚀
             logger.error(f"Error processing Arabic text: {e}")
             return text
     
-    def split_text_to_lines(self, text, font_size, max_width, is_arabic=False):
-        """Split text into lines that fit within max_width using PIL"""
-        # Use a dummy image to measure text width
-        dummy_img = Image.new('RGB', (1, 1))
-        draw = ImageDraw.Draw(dummy_img)
-        font_path = self.get_font_path(is_arabic)
-        font = ImageFont.truetype(font_path, font_size) if font_path else ImageFont.load_default()
-        
+    def split_text_to_lines(self, text, font, max_width, is_arabic=False):
+        """Split text into lines that fit within max_width"""
         lines = []
         
         # Process Arabic text
@@ -425,7 +396,7 @@ Use the buttons below to get started! 🚀
                 else:
                     test_line_processed = test_line
                 
-                bbox = draw.textbbox((0, 0), test_line_processed, font=font)
+                bbox = font.getbbox(test_line_processed)
                 text_width = bbox[2] - bbox[0]
                 
                 if text_width <= max_width:
@@ -441,7 +412,7 @@ Use the buttons below to get started! 🚀
         return lines
     
     def create_image_with_quote(self, image_path, quote):
-        """Create beautiful image with quote (for image reels)"""
+        """Create beautiful image with quote"""
         try:
             original = Image.open(image_path)
             width, height = 1080, 1350
@@ -456,10 +427,9 @@ Use the buttons below to get started! 🚀
             is_arabic = self.is_arabic_text(quote)
             
             font_size = 60 if is_arabic else 50
-            font_path = self.get_font_path(is_arabic)
-            font = ImageFont.truetype(font_path, font_size) if font_path else ImageFont.load_default()
+            font = self.get_font(font_size, is_arabic)
             
-            lines = self.split_text_to_lines(quote, font_size, width * 0.8, is_arabic)
+            lines = self.split_text_to_lines(quote, font, width * 0.8, is_arabic)
             line_height = 80 if is_arabic else 70
             total_height = len(lines) * line_height
             text_y = (height - total_height) // 2
@@ -520,10 +490,9 @@ Use the buttons below to get started! 🚀
             is_arabic = self.is_arabic_text(quote)
             
             font_size = 60 if is_arabic else 50
-            font_path = self.get_font_path(is_arabic)
-            font = ImageFont.truetype(font_path, font_size) if font_path else ImageFont.load_default()
+            font = self.get_font(font_size, is_arabic)
             
-            lines = self.split_text_to_lines(quote, font_size, width * 0.8, is_arabic)
+            lines = self.split_text_to_lines(quote, font, width * 0.8, is_arabic)
             line_height = 80 if is_arabic else 70
             total_height = len(lines) * line_height
             text_y = (height - total_height) // 2
@@ -575,8 +544,8 @@ Use the buttons below to get started! 🚀
         
         return MAIN_MENU
     
-    async def handle_make_image_reels(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Create 17-second image reels (video from images with quotes)"""
+    async def handle_make_reels(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Create reels with quotes"""
         user_id = update.effective_user.id
         
         if user_id not in self.user_sessions:
@@ -598,10 +567,10 @@ Use the buttons below to get started! 🚀
             return MAIN_MENU
         
         # Clear previous results and set processing flag
-        session['processed_images'] = []
+        session['processed_media'] = []
         self.processing_flags[user_id] = True
         
-        processing_msg = await update.message.reply_text("🎬 *Creating 17-second video reels from images...*", parse_mode='Markdown')
+        processing_msg = await update.message.reply_text("🔄 *Starting to create your reels...*", parse_mode='Markdown')
         
         total_combinations = len(all_media) * len(quotes)
         created = 0
@@ -615,22 +584,24 @@ Use the buttons below to get started! 🚀
                 
                 try:
                     current_index = created + 1
-                    progress = f"🎬 Creating video {current_index}/{total_combinations} (17 seconds each)..."
+                    progress = f"🔄 Creating reel {current_index}/{total_combinations}..."
                     await processing_msg.edit_text(progress)
                     
                     media_path = media['file_path']
                     
-                    # Create 17-second video from image
-                    result_path = await self.create_image_video_reel(media_path, quote)
+                    if media['type'] == 'image':
+                        result_path = self.create_image_with_quote(media_path, quote)
+                    else:  # video
+                        result_path = self.create_video_thumbnail(media_path, quote)
                     
                     if result_path and os.path.exists(result_path):
-                        session['processed_images'].append({
+                        session['processed_media'].append({
                             'media_path': result_path,
                             'quote': quote,
                             'media_index': media_index,
                             'quote_index': quote_index,
                             'index': created,
-                            'type': 'video'  # Now all are videos
+                            'type': media['type']
                         })
                         created += 1
                         
@@ -645,410 +616,52 @@ Use the buttons below to get started! 🚀
         if user_id in self.processing_flags:
             del self.processing_flags[user_id]
         
-        # Send all created video reels with save buttons
+        # Send all created reels with save buttons
         if created > 0:
-            await processing_msg.edit_text(f"✅ *Created {created} video reels! Sending them now...*", parse_mode='Markdown')
+            await processing_msg.edit_text(f"✅ *Created {created} reels! Sending them now...*", parse_mode='Markdown')
             
-            for i, media_data in enumerate(session['processed_images']):
+            for i, media_data in enumerate(session['processed_media']):
                 try:
                     if not self.processing_flags.get(user_id, True):
                         break
                         
                     if os.path.exists(media_data['media_path']):
                         with open(media_data['media_path'], 'rb') as f:
-                            caption = f"**Video Reel {i+1} (17 seconds)**\n{media_data['quote']}"
+                            caption = f"**Reel {i+1}**\n{media_data['quote']}"
                             
                             if len(all_media) == 1 and len(quotes) > 1:
                                 caption += f"\n\n📝 Quote {media_data['quote_index'] + 1}"
                             
-                            await update.message.reply_video(
-                                video=f,
+                            await update.message.reply_photo(
+                                photo=f,
                                 caption=caption,
-                                reply_markup=self.get_save_keyboard(i, is_video=True),
-                                parse_mode='Markdown',
-                                duration=self.VIDEO_DURATION
+                                reply_markup=self.get_save_keyboard(i),
+                                parse_mode='Markdown'
                             )
                         await asyncio.sleep(1)  # Rate limiting
                         
                 except Exception as e:
-                    logger.error(f"Error sending video reel {i}: {e}")
+                    logger.error(f"Error sending reel {i}: {e}")
                     continue
             
             await update.message.reply_text(
-                f"🎉 *Successfully Created {created} Video Reels!*\n\n"
+                f"🎉 *Successfully Created {created} Reels!*\n\n"
                 f"📊 *Summary:*\n"
                 f"📷 Photos: {len(photos)}\n"
                 f"🎥 Videos: {len(videos)}\n"
                 f"📝 Quotes: {len(quotes)}\n"
-                f"🎬 Created: {created} video reels (17 seconds each)\n\n"
-                f"💾 *Click the 'Save' button under each video to download it directly to your device!*",
+                f"🎬 Created: {created} reels\n\n"
+                f"💾 *Click the 'Save' button under each reel to download it directly to your device!*",
                 reply_markup=self.get_main_keyboard(),
                 parse_mode='Markdown'
             )
         else:
             await processing_msg.edit_text(
-                "❌ No video reels were created. Please try again with different media or quotes.",
+                "❌ No reels were created. Please try again with different media or quotes.",
                 reply_markup=self.get_main_keyboard()
             )
         
         return MAIN_MENU
-    
-    async def handle_make_video_reels(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Create REAL 17-second video reels with transitions, text animations, and background music"""
-        user_id = update.effective_user.id
-        
-        if user_id not in self.user_sessions:
-            await self.start(update, context)
-            return MAIN_MENU
-        
-        session = self.user_sessions[user_id]
-        photos = session['photos']
-        videos = session['videos']
-        quotes = session['quotes']
-        
-        all_media = photos + videos
-        
-        if not all_media or not quotes:
-            await update.message.reply_text(
-                "❌ Please upload both media and quotes first!",
-                reply_markup=self.get_main_keyboard()
-            )
-            return MAIN_MENU
-        
-        # Clear previous results and set processing flag
-        session['processed_videos'] = []
-        self.processing_flags[user_id] = True
-        
-        processing_msg = await update.message.reply_text("🎥 *Creating 17-second video reels...*", parse_mode='Markdown')
-        
-        total_combinations = len(all_media) * len(quotes)
-        created = 0
-        
-        for media_index, media in enumerate(all_media):
-            for quote_index, quote in enumerate(quotes):
-                # Check if user stopped the process
-                if not self.processing_flags.get(user_id, True):
-                    await processing_msg.edit_text("🛑 *Process stopped by user!*", parse_mode='Markdown')
-                    return MAIN_MENU
-                
-                try:
-                    current_index = created + 1
-                    progress = f"🎥 Creating video reel {current_index}/{total_combinations} (17 seconds)..."
-                    await processing_msg.edit_text(progress)
-                    
-                    media_path = media['file_path']
-                    
-                    # Create the video reel
-                    result_path = await self.create_video_reel(media_path, quote, media['type'])
-                    
-                    if result_path and os.path.exists(result_path):
-                        session['processed_videos'].append({
-                            'media_path': result_path,
-                            'quote': quote,
-                            'media_index': media_index,
-                            'quote_index': quote_index,
-                            'index': created,
-                            'type': media['type']
-                        })
-                        created += 1
-                        
-                    # Small delay to prevent overwhelming the system
-                    await asyncio.sleep(0.5)
-                        
-                except Exception as e:
-                    logger.error(f"Error creating video reel {media_index}-{quote_index}: {e}")
-                    continue
-        
-        # Clean up processing flag
-        if user_id in self.processing_flags:
-            del self.processing_flags[user_id]
-        
-        # Send all created video reels with save buttons
-        if created > 0:
-            await processing_msg.edit_text(f"✅ *Created {created} video reels! Sending them now...*", parse_mode='Markdown')
-            
-            for i, media_data in enumerate(session['processed_videos']):
-                try:
-                    if not self.processing_flags.get(user_id, True):
-                        break
-                        
-                    if os.path.exists(media_data['media_path']):
-                        with open(media_data['media_path'], 'rb') as f:
-                            caption = f"**Video Reel {i+1} (17 seconds)**\n{media_data['quote']}"
-                            
-                            if len(all_media) == 1 and len(quotes) > 1:
-                                caption += f"\n\n📝 Quote {media_data['quote_index'] + 1}"
-                            
-                            await update.message.reply_video(
-                                video=f,
-                                caption=caption,
-                                reply_markup=self.get_save_keyboard(i, is_video=True),
-                                parse_mode='Markdown',
-                                duration=self.VIDEO_DURATION
-                            )
-                        await asyncio.sleep(1)  # Rate limiting
-                        
-                except Exception as e:
-                    logger.error(f"Error sending video reel {i}: {e}")
-                    continue
-            
-            await update.message.reply_text(
-                f"🎉 *Successfully Created {created} Video Reels!*\n\n"
-                f"📊 *Summary:*\n"
-                f"📷 Photos: {len(photos)}\n"
-                f"🎥 Videos: {len(videos)}\n"
-                f"📝 Quotes: {len(quotes)}\n"
-                f"🎬 Created: {created} video reels (17 seconds each)\n\n"
-                f"💾 *Click the 'Save' button under each video to download it directly to your device!*",
-                reply_markup=self.get_main_keyboard(),
-                parse_mode='Markdown'
-            )
-        else:
-            await processing_msg.edit_text(
-                "❌ No video reels were created. Please try again with different media or quotes.",
-                reply_markup=self.get_main_keyboard()
-            )
-        
-        return MAIN_MENU
-    
-    async def create_image_video_reel(self, image_path, quote):
-        """Create a 17-second video from an image with animated text and background music"""
-        try:
-            # Define video parameters
-            width, height = 1080, 1350
-            duration = self.VIDEO_DURATION  # 17 seconds
-            
-            # Load and prepare image
-            img = Image.open(image_path)
-            img = img.convert('RGB')
-            
-            # Create a temporary image file
-            temp_img_path = tempfile.mktemp(suffix='_temp.jpg')
-            img.save(temp_img_path, quality=95)
-            
-            # Create video clip from image with zoom/pan effect
-            img_clip = mp.ImageClip(temp_img_path, duration=duration)
-            
-            # Add smooth zoom effect (zooming in from 1.0 to 1.15 over 17 seconds)
-            zoom_factor = lambda t: 1.0 + 0.15 * (t / duration)  # Slow zoom from 1.0 to 1.15
-            zoom_clip = img_clip.resize(zoom_factor).set_position(('center', 'center'))
-            
-            # Add subtle horizontal pan for more dynamism
-            def pan_position(t):
-                x_offset = np.sin(t * 0.3) * 20  # Gentle side-to-side movement
-                return ('center', 'center')
-            
-            final_clip = zoom_clip.set_position(pan_position)
-            
-            # Create animated text
-            is_arabic = self.is_arabic_text(quote)
-            font_path = self.get_font_path(is_arabic)
-            font_size = 70 if is_arabic else 60
-            color = 'white'
-            stroke_color = 'black'
-            stroke_width = 3
-            
-            # Process Arabic text
-            if is_arabic:
-                display_text = self.process_arabic_text(quote)
-            else:
-                display_text = quote
-            
-            # Split text into lines that fit
-            text_lines = self.split_text_to_lines(quote, font_size, width * 0.8, is_arabic)
-            text_block = '\n'.join(text_lines)
-            
-            # Create text clip
-            text_clip = TextClip(text_block, fontsize=font_size, font=font_path if font_path else 'Arial',
-                               color=color, stroke_color=stroke_color, stroke_width=stroke_width,
-                               method='caption', size=(width * 0.9, None), align='center').set_duration(duration)
-            
-            # Position text at center
-            text_clip = text_clip.set_position(('center', 'center')).set_start(0)
-            
-            # Add fade-in and fade-out to text
-            text_clip = text_clip.fadein(2).fadeout(2)
-            
-            # Add subtle animation: slight opacity change
-            def opacity_func(t):
-                # More visible during middle, fade slightly at start/end
-                if t < 2:
-                    return t / 2  # Fade in
-                elif t > duration - 2:
-                    return (duration - t) / 2  # Fade out
-                else:
-                    return 0.95 + 0.05 * np.sin(t * 0.5)  # Subtle pulse
-            
-            text_clip = text_clip.set_opacity(opacity_func)
-            
-            # Composite video with text
-            final_video = CompositeVideoClip([final_clip, text_clip]).set_duration(duration)
-            
-            # Add background music if available
-            nasheed_path = 'background_nasheed.mp3'
-            if os.path.exists(nasheed_path):
-                try:
-                    audio_clip = AudioFileClip(nasheed_path).subclip(0, duration)
-                    # Loop audio if shorter than video
-                    if audio_clip.duration < duration:
-                        audio_clip = audio_clip.loop(duration=duration)
-                    final_video = final_video.set_audio(audio_clip)
-                except Exception as e:
-                    logger.warning(f"Could not add background music: {e}")
-            
-            # Create output path
-            output_path = tempfile.mktemp(suffix='_image_reel.mp4')
-            
-            # Write video file with optimized settings
-            final_video.write_videofile(
-                output_path, 
-                fps=30, 
-                codec='libx264', 
-                audio_codec='aac',
-                preset='medium', 
-                threads=4, 
-                ffmpeg_params=['-profile:v', 'baseline', '-level', '3.0'],
-                logger=None
-            )
-            
-            # Clean up temporary files
-            final_video.close()
-            img_clip.close()
-            text_clip.close()
-            if os.path.exists(temp_img_path):
-                os.unlink(temp_img_path)
-            
-            return output_path
-            
-        except Exception as e:
-            logger.error(f"Error creating image video reel: {e}")
-            # Clean up on error
-            if 'temp_img_path' in locals() and os.path.exists(temp_img_path):
-                os.unlink(temp_img_path)
-            return None
-    
-    async def create_video_reel(self, media_path, quote, media_type):
-        """Create a 17-second video reel with smooth transitions, text animation, and background music"""
-        try:
-            # Define video parameters
-            width, height = 1080, 1350
-            duration = self.VIDEO_DURATION  # 17 seconds
-            
-            # Load media
-            if media_type == 'image':
-                # Create a 17-second video clip from the image with effects
-                return await self.create_image_video_reel(media_path, quote)
-            else:  # video
-                # Load video clip
-                video_clip = mp.VideoFileClip(media_path)
-                
-                # If video is shorter than 17 seconds, loop it
-                if video_clip.duration < duration:
-                    # Loop the video to reach 17 seconds
-                    loops_needed = int(np.ceil(duration / video_clip.duration))
-                    clips = [video_clip] * loops_needed
-                    video_clip = concatenate_videoclips(clips, method="compose")
-                    video_clip = video_clip.subclip(0, duration)
-                else:
-                    # Trim to exactly 17 seconds
-                    video_clip = video_clip.subclip(0, duration)
-                
-                # Resize to fit
-                video_clip = video_clip.resize((width, height))
-                final_clip = video_clip
-            
-            # Create animated text
-            is_arabic = self.is_arabic_text(quote)
-            font_path = self.get_font_path(is_arabic)
-            font_size = 70 if is_arabic else 60
-            color = 'white'
-            stroke_color = 'black'
-            stroke_width = 3
-            
-            # Process Arabic text
-            if is_arabic:
-                display_text = self.process_arabic_text(quote)
-            else:
-                display_text = quote
-            
-            # Split text into lines that fit
-            text_lines = self.split_text_to_lines(quote, font_size, width * 0.8, is_arabic)
-            text_block = '\n'.join(text_lines)
-            
-            # Create text clip
-            text_clip = TextClip(text_block, fontsize=font_size, font=font_path if font_path else 'Arial',
-                               color=color, stroke_color=stroke_color, stroke_width=stroke_width,
-                               method='caption', size=(width * 0.9, None), align='center').set_duration(duration)
-            
-            # Position text at center
-            text_clip = text_clip.set_position(('center', 'center')).set_start(0)
-            
-            # Add fade-in and fade-out
-            text_clip = text_clip.fadein(2).fadeout(2)
-            
-            # Add subtle animation
-            def scale_func(t):
-                # Gentle breathing effect
-                base_scale = 1.0
-                pulse = 0.02 * np.sin(2 * np.pi * t / 8)  # Pulse every 8 seconds
-                return base_scale + pulse
-            
-            text_clip = text_clip.resize(scale_func)
-            
-            # Add semi-transparent background behind text for better readability
-            text_size = text_clip.size
-            bg_clip = ColorClip(size=(int(text_size[0] * 1.1), int(text_size[1] * 1.2)), 
-                              color=(0, 0, 0), duration=duration, col_opacity=0.5)
-            bg_clip = bg_clip.set_position(('center', 'center')).set_start(0)
-            bg_clip = bg_clip.fadein(2).fadeout(2)
-            
-            # Composite all elements
-            final_video = CompositeVideoClip([final_clip, bg_clip, text_clip]).set_duration(duration)
-            
-            # Add background music if available
-            nasheed_path = 'background_nasheed.mp3'
-            if os.path.exists(nasheed_path):
-                try:
-                    audio_clip = AudioFileClip(nasheed_path).subclip(0, duration)
-                    # Loop audio if shorter than video
-                    if audio_clip.duration < duration:
-                        audio_clip = audio_clip.loop(duration=duration)
-                    
-                    # Adjust audio volume to not overpower the video
-                    audio_clip = audio_clip.volumex(0.3)
-                    final_video = final_video.set_audio(audio_clip)
-                except Exception as e:
-                    logger.warning(f"Could not add background music: {e}")
-            
-            # Create output path
-            output_path = tempfile.mktemp(suffix='_reel.mp4')
-            
-            # Write video file with optimized settings
-            final_video.write_videofile(
-                output_path, 
-                fps=30, 
-                codec='libx264', 
-                audio_codec='aac',
-                preset='medium', 
-                threads=4, 
-                ffmpeg_params=['-profile:v', 'baseline', '-level', '3.0'],
-                logger=None
-            )
-            
-            # Close clips to free memory
-            final_video.close()
-            if media_type == 'image':
-                pass  # Already handled in create_image_video_reel
-            else:
-                video_clip.close()
-            text_clip.close()
-            bg_clip.close()
-            
-            return output_path
-            
-        except Exception as e:
-            logger.error(f"Error creating video reel: {e}")
-            return None
     
     async def handle_save_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle save button clicks"""
@@ -1060,40 +673,22 @@ Use the buttons below to get started! 🚀
         
         if data.startswith('save_'):
             try:
-                parts = data.split('_')
-                media_index = int(parts[1])
-                is_video = parts[2] == 'video'
+                media_index = int(data.split('_')[1])
                 
                 if user_id in self.user_sessions:
                     session = self.user_sessions[user_id]
-                    
-                    # Check both processed images and videos (both are now videos)
-                    if is_video:
-                        media_list = session['processed_videos']
-                    else:
-                        media_list = session['processed_images']
+                    media_list = session['processed_media']
                     
                     if 0 <= media_index < len(media_list):
                         media_data = media_list[media_index]
                         
                         if os.path.exists(media_data['media_path']):
                             with open(media_data['media_path'], 'rb') as f:
-                                if is_video or 'video' in media_data:
-                                    filename = f"islamic_video_reel_{media_index + 1}_17s.mp4"
-                                    caption = f"💾 Saved: Video Reel {media_index + 1} (17 seconds)\n{media_data['quote']}"
-                                    await query.message.reply_document(
-                                        document=f,
-                                        filename=filename,
-                                        caption=caption
-                                    )
-                                else:
-                                    filename = f"islamic_image_reel_{media_index + 1}.jpg"
-                                    caption = f"💾 Saved: Image Reel {media_index + 1}\n{media_data['quote']}"
-                                    await query.message.reply_document(
-                                        document=f,
-                                        filename=filename,
-                                        caption=caption
-                                    )
+                                await query.message.reply_document(
+                                    document=f,
+                                    filename=f"islamic_reel_{media_index + 1}.jpg",
+                                    caption=f"💾 Saved: Reel {media_index + 1}\n{media_data['quote']}"
+                                )
                             await query.edit_message_reply_markup(reply_markup=None)
                             return
                 
@@ -1111,36 +706,34 @@ Use the buttons below to get started! 🚀
             await self.start(update, context)
             return MAIN_MENU
         
-        # Combine both image and video reels
-        image_list = self.user_sessions[user_id]['processed_images']
-        video_list = self.user_sessions[user_id]['processed_videos']
-        all_reels = image_list + video_list
+        media_list = self.user_sessions[user_id]['processed_media']
         
-        if not all_reels:
+        if not media_list:
             await update.message.reply_text(
                 "❌ No reels found! Please create reels first.",
                 reply_markup=self.get_main_keyboard()
             )
             return MAIN_MENU
         
-        status_msg = await update.message.reply_text(f"💾 *Preparing {len(all_reels)} reels for download...*", parse_mode='Markdown')
+        status_msg = await update.message.reply_text(f"💾 *Preparing {len(media_list)} reels for download...*", parse_mode='Markdown')
         
         sent = 0
-        for i, media_data in enumerate(all_reels):
+        for i, media_data in enumerate(media_list):
             try:
                 if os.path.exists(media_data['media_path']):
                     with open(media_data['media_path'], 'rb') as f:
-                        # All reels are now 17-second videos
-                        filename = f"islamic_reel_{i+1}_17s.mp4"
-                        caption = f"Reel {i+1} (17 seconds)\n{media_data['quote']}"
-                        await update.message.reply_document(document=f, filename=filename, caption=caption)
+                        await update.message.reply_document(
+                            document=f,
+                            filename=f"islamic_reel_{i+1}.jpg",
+                            caption=f"Reel {i+1}\n{media_data['quote']}"
+                        )
                     sent += 1
                     await asyncio.sleep(1)  # Rate limiting
             except Exception as e:
                 logger.error(f"Error saving reel {i}: {e}")
                 continue
         
-        await status_msg.edit_text(f"✅ *Successfully saved {sent} video reels (17 seconds each) to your device!*", parse_mode='Markdown')
+        await status_msg.edit_text(f"✅ *Successfully saved {sent} reels to your device!*", parse_mode='Markdown')
         return MAIN_MENU
     
     async def handle_reset(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1162,14 +755,7 @@ Use the buttons below to get started! 🚀
                 except:
                     pass
             
-            for media in session['processed_images']:
-                try:
-                    if os.path.exists(media['media_path']):
-                        os.unlink(media['media_path'])
-                except:
-                    pass
-            
-            for media in session['processed_videos']:
+            for media in session['processed_media']:
                 try:
                     if os.path.exists(media['media_path']):
                         os.unlink(media['media_path'])
@@ -1177,7 +763,7 @@ Use the buttons below to get started! 🚀
                     pass
             
             # Reset session
-            self.user_sessions[user_id] = {'photos': [], 'videos': [], 'quotes': [], 'processed_images': [], 'processed_videos': []}
+            self.user_sessions[user_id] = {'photos': [], 'videos': [], 'quotes': [], 'processed_media': []}
         
         await update.message.reply_text(
             "🔄 *Reset Complete!*\n\nAll data has been cleared. You can start fresh!",
@@ -1199,8 +785,7 @@ def run_bot():
                 MAIN_MENU: [
                     MessageHandler(filters.Regex('^📤 Upload Media$'), bot.handle_upload_media),
                     MessageHandler(filters.Regex('^📝 Add Quotes$'), bot.handle_add_quotes),
-                    MessageHandler(filters.Regex('^🎬 Make Image Reels$'), bot.handle_make_image_reels),
-                    MessageHandler(filters.Regex('^🎥 Make Video Reels$'), bot.handle_make_video_reels),
+                    MessageHandler(filters.Regex('^🎬 Make Reels$'), bot.handle_make_reels),
                     MessageHandler(filters.Regex('^💾 Save All$'), bot.handle_save_all),
                     MessageHandler(filters.Regex('^🛑 Stop Process$'), bot.handle_stop_process),
                     MessageHandler(filters.Regex('^🔄 Reset$'), bot.handle_reset),
@@ -1221,7 +806,6 @@ def run_bot():
         
         print("🤖 Islamic Reels Bot Starting...")
         print("✅ Bot is running with polling!")
-        print(f"🎬 All videos will be {bot.VIDEO_DURATION} seconds long")
         print("🚀 Ready to receive messages...")
         
         application.run_polling(drop_pending_updates=True)
@@ -1252,8 +836,6 @@ if __name__ == '__main__':
     print("🕌 Islamic Reels Bot - Lifetime Version")
     print("🌍 Supports English & Arabic")
     print("🎥 Photos & Videos")
-    print(f"🎞️ {IslamicReelsBot().VIDEO_DURATION}-Second Video Reels")
-    print("🔊 Background Nasheeds")
     print("💾 Save Direct to Device")
     print("🛑 Stop Process Feature")
     print("=" * 50)
